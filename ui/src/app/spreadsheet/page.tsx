@@ -10,7 +10,7 @@ import "reactflow/dist/style.css";
 import { useRouter } from "next/navigation";
 import CytoscapeComponent from "react-cytoscapejs";
 import cytoscape from "cytoscape";
-import { FaCog } from "react-icons/fa";
+import { FaCog, FaCheckCircle } from "react-icons/fa";
 
 function HierarchyTree({ hierarchy }: { hierarchy: any }) {
   if (!hierarchy || hierarchy.error) return <div className="text-red-600">{hierarchy?.error || "No hierarchy data"}</div>;
@@ -249,6 +249,8 @@ export default function SpreadsheetPage() {
   const [showSidebar, setShowSidebar] = useState(false);
   // DB2 connection form state
   const [db2Settings, setDb2Settings] = useState({
+    id: '',
+    name: '',
     hostname: '',
     port: '',
     database: '',
@@ -261,14 +263,15 @@ export default function SpreadsheetPage() {
   // Add modal state
   const [showConnectionModal, setShowConnectionModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
-  // Mocked connections list
-  const maximoConnections = [
-    { name: 'Maximo Dev', id: 'dev' },
-    { name: 'Maximo Prod', id: 'prod' },
-    { name: 'Add New Connection', id: 'new' },
-  ];
+  // Remove hardcoded maximoConnections, use state instead
+  const [connections, setConnections] = useState<any[]>([]);
+  const [loadingConnections, setLoadingConnections] = useState(true);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
   // Add tab state
   const [activeTab, setActiveTab] = useState<'cobie' | 'maximo'>('cobie');
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [testMessage, setTestMessage] = useState<string>('');
 
   // Update modal width on window resize
   useEffect(() => {
@@ -536,18 +539,75 @@ export default function SpreadsheetPage() {
     setDb2Settings((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleDb2Connect = async (e: React.FormEvent) => {
+  // Load connections from API
+  useEffect(() => {
+    if (activeTab === 'maximo') {
+      setLoadingConnections(true);
+      fetch('/api/maximo-connections')
+        .then(res => res.json())
+        .then(data => {
+          setConnections(data);
+          setLoadingConnections(false);
+        })
+        .catch(err => {
+          setConnectionsError('Failed to load connections');
+          setLoadingConnections(false);
+        });
+    }
+  }, [activeTab]);
+
+  // Save connection to API
+  const handleSaveConnection = async (e: React.FormEvent) => {
     e.preventDefault();
     setDb2Connecting(true);
     setDb2Error(null);
     setDb2Connected(false);
-    // TODO: Implement backend call to test DB2 connection
-    setTimeout(() => {
-      // Simulate success
+    try {
+      const res = await fetch('/api/maximo-connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...db2Settings,
+          name: db2Settings.name || 'New Connection',
+          id: db2Settings.id || undefined,
+        }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setDb2Connecting(false);
+        setDb2Connected(true);
+        setSelectedConnection(null);
+        setDb2Settings({ id: '', name: '', hostname: '', port: '', database: '', username: '', password: '' });
+        // Reload connections
+        setLoadingConnections(true);
+        fetch('/api/maximo-connections')
+          .then(res => res.json())
+          .then(data => {
+            setConnections(data);
+            setLoadingConnections(false);
+          });
+      } else {
+        setDb2Error('Failed to save connection');
+        setDb2Connecting(false);
+      }
+    } catch (err) {
+      setDb2Error('Failed to save connection');
       setDb2Connecting(false);
-      setDb2Connected(true);
-    }, 1200);
+    }
   };
+
+  // Persist activeSessionId in localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem('activeSessionId');
+    if (stored) setActiveSessionId(stored);
+  }, []);
+  useEffect(() => {
+    if (activeSessionId) {
+      localStorage.setItem('activeSessionId', activeSessionId);
+    } else {
+      localStorage.removeItem('activeSessionId');
+    }
+  }, [activeSessionId]);
 
   if (!file) {
     return null;
@@ -577,7 +637,6 @@ export default function SpreadsheetPage() {
           <header className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-6 px-8">
             <div>
               <h1 className="text-4xl font-extrabold text-blue-800 mb-2 tracking-tight drop-shadow-sm">COBie Maximo Cross Validation</h1>
-              <p className="text-lg text-gray-500">Upload and explore COBie data in a modern, interactive spreadsheet.</p>
             </div>
             <div className="flex flex-col gap-3 items-end mt-6">
               {/* Segmented control for hierarchy type */}
@@ -726,34 +785,75 @@ export default function SpreadsheetPage() {
           <div className="w-full flex flex-col items-center justify-start py-12 px-4">
             <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-8 border border-gray-200">
               <h2 className="text-2xl font-bold text-blue-700 mb-6">Maximo Connections</h2>
-              <ul className="flex flex-col gap-3 mb-8">
-                {maximoConnections.map(conn => (
-                  <li key={conn.id}>
-                    <button
-                      className="w-full text-left px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 hover:bg-blue-50 font-semibold text-base text-gray-800 transition flex items-center justify-between"
-                      onClick={() => {
-                        setSelectedConnection(conn.id);
-                        setShowConnectionModal(true);
-                      }}
-                    >
-                      {conn.name}
-                      <span className="ml-2 text-gray-400">&rarr;</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {/* Show connection modal inline instead of as a modal */}
+              {loadingConnections ? (
+                <div className="text-gray-500 text-center py-8">Loading connections...</div>
+              ) : connectionsError ? (
+                <div className="text-red-600 text-center py-8">{connectionsError}</div>
+              ) : (
+                <>
+                  <ul className="flex flex-col gap-3 mb-8">
+                    {connections.map(conn => (
+                      <li key={conn.id}>
+                        <div className={`flex items-center w-full px-4 py-3 rounded-lg border border-gray-200 transition font-semibold text-base text-gray-800 justify-between ${activeSessionId === conn.id ? 'bg-blue-50 border-blue-400 shadow' : 'bg-gray-50 hover:bg-blue-50'}`}> 
+                          <button
+                            className="flex-1 text-left flex items-center gap-2"
+                            onClick={() => {
+                              setSelectedConnection(conn.id);
+                              setDb2Settings(conn);
+                            }}
+                          >
+                            {conn.name || conn.hostname}
+                            {activeSessionId === conn.id && (
+                              <FaCheckCircle className="text-green-500 ml-2" title="Connected" />
+                            )}
+                          </button>
+                          <button
+                            className={`ml-3 px-4 py-1 rounded-lg font-bold text-sm border ${activeSessionId === conn.id ? 'bg-blue-600 text-white border-blue-700 cursor-not-allowed' : 'bg-white text-blue-700 border-blue-400 hover:bg-blue-100'}`}
+                            onClick={() => {
+                              if (testStatus !== 'loading' && activeSessionId !== conn.id) setActiveSessionId(conn.id);
+                            }}
+                            disabled={activeSessionId === conn.id || testStatus === 'loading'}
+                          >
+                            {activeSessionId === conn.id ? 'Connected' : 'Connect'}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    className="w-full mb-8 px-4 py-3 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 hover:bg-blue-100 font-semibold text-base text-blue-700 transition flex items-center justify-center"
+                    onClick={() => {
+                      setSelectedConnection('new');
+                      setDb2Settings({ id: '', name: '', hostname: '', port: '', database: '', username: '', password: '' });
+                    }}
+                  >
+                    + Add New Connection
+                  </button>
+                </>
+              )}
+              {/* Show connection form inline if selected */}
               {selectedConnection && (
                 <div className="relative bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md z-70 animate-slide-in-bottom border border-blue-100">
                   <button
                     className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-3xl font-bold"
-                    onClick={() => { setSelectedConnection(null); setDb2Connected(false); setDb2Error(null); }}
+                    onClick={() => { setSelectedConnection(null); setDb2Connected(false); setDb2Error(null); setTestStatus('idle'); setTestMessage(''); }}
                     aria-label="Close connection modal"
                   >
                     &times;
                   </button>
-                  <h3 className="text-xl font-bold text-blue-700 mb-4">{selectedConnection === 'new' ? 'Add New Connection' : maximoConnections.find(c => c.id === selectedConnection)?.name}</h3>
-                  <form className="flex flex-col gap-4" onSubmit={handleDb2Connect}>
+                  <h3 className="text-xl font-bold text-blue-700 mb-4">{selectedConnection === 'new' ? 'Add New Connection' : db2Settings.name || db2Settings.hostname}</h3>
+                  <form className="flex flex-col gap-4" onSubmit={handleSaveConnection}>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-semibold text-gray-700">Connection Name</span>
+                      <input
+                        type="text"
+                        name="name"
+                        value={db2Settings.name || ''}
+                        onChange={handleDb2Input}
+                        className="border rounded px-3 py-2 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                        required
+                      />
+                    </label>
                     <label className="flex flex-col gap-1">
                       <span className="font-semibold text-gray-700">Hostname</span>
                       <input
@@ -809,15 +909,48 @@ export default function SpreadsheetPage() {
                         required
                       />
                     </label>
-                    <button
-                      type="submit"
-                      className="mt-2 px-5 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition-colors font-semibold text-base disabled:opacity-60"
-                      disabled={db2Connecting}
-                    >
-                      {db2Connecting ? 'Testing...' : db2Connected ? 'Connection Successful!' : 'Test Connection'}
-                    </button>
+                    <div className="flex gap-3 mt-2">
+                      <button
+                        type="button"
+                        className="px-5 py-2 bg-gray-100 text-blue-700 rounded shadow border border-blue-300 hover:bg-blue-50 font-semibold text-base disabled:opacity-60"
+                        disabled={testStatus === 'loading'}
+                        onClick={async () => {
+                          setTestStatus('loading');
+                          setTestMessage('');
+                          try {
+                            const res = await fetch('/api/maximo-connections/test', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(db2Settings),
+                            });
+                            const result = await res.json();
+                            if (result.success) {
+                              setTestStatus('success');
+                              setTestMessage('Connection successful!');
+                            } else {
+                              setTestStatus('error');
+                              setTestMessage(result.message || 'Connection failed');
+                            }
+                          } catch (err) {
+                            setTestStatus('error');
+                            setTestMessage('Connection failed');
+                          }
+                        }}
+                      >
+                        {testStatus === 'loading' ? 'Testing...' : 'Test'}
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-5 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition-colors font-semibold text-base disabled:opacity-60"
+                        disabled={db2Connecting}
+                      >
+                        {db2Connecting ? 'Saving...' : db2Connected ? 'Saved!' : 'Save Connection'}
+                      </button>
+                    </div>
+                    {testStatus === 'success' && <div className="text-green-600 text-sm mt-2">{testMessage}</div>}
+                    {testStatus === 'error' && <div className="text-red-600 text-sm mt-2">{testMessage}</div>}
                     {db2Error && <div className="text-red-600 text-sm mt-2">{db2Error}</div>}
-                    {db2Connected && <div className="text-green-600 text-sm mt-2">Connection successful!</div>}
+                    {db2Connected && <div className="text-green-600 text-sm mt-2">Connection saved!</div>}
                   </form>
                 </div>
               )}
