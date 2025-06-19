@@ -225,6 +225,7 @@ export default function SpreadsheetPage() {
           [facilityTab]: allSheets[facilityTab],
           [floorTab]: allSheets[floorTab],
           [spaceTab]: allSheets[spaceTab],
+          Component: allSheets[componentTab],
         });
       } else if (hierarchyType === 'system') {
         hierarchyResult = buildCobieSystemHierarchy({
@@ -1613,7 +1614,9 @@ export default function SpreadsheetPage() {
                 <SystemDrilldownTree hierarchy={hierarchy} />
               </div>
             ) : (
-              <HierarchyTree hierarchy={hierarchy} />
+              <div style={{ maxHeight: modalHeight - 80, overflowY: 'auto' }}>
+                <HierarchyTree hierarchy={hierarchy} />
+              </div>
             )}
           </div>
           {/* Render a side modal when selectedComponentNode is set */}

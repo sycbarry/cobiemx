@@ -2,16 +2,16 @@
 // Library for constructing a hierarchy tree from COBie spreadsheet data
 
 /**
- * Build a simple Facility > Floor > Space hierarchy tree from COBie data.
+ * Build a Facility > Floor > Space > Zone (optional) > Component hierarchy tree from COBie data.
  * @param {Object} sheets - An object where keys are sheet names and values are arrays of rows (first row is header).
- * @returns {Object} Hierarchy tree (stub for now)
+ * @returns {Object} Hierarchy tree
  */
 export function buildCobieHierarchy(sheets) {
-  // Example: Just return the Facility > Floor > Space hierarchy if present
-  // This is a stub. Real logic will depend on COBie structure.
   const facilitySheet = sheets["Facility"];
   const floorSheet = sheets["Floor"];
   const spaceSheet = sheets["Space"];
+  const zoneSheet = sheets["Zone"];
+  const componentSheet = sheets["Component"];
 
   if (!facilitySheet || !floorSheet || !spaceSheet) return { error: "Missing required sheets" };
 
@@ -19,19 +19,94 @@ export function buildCobieHierarchy(sheets) {
   const [facilityHeader, ...facilityRows] = facilitySheet;
   const [floorHeader, ...floorRows] = floorSheet;
   const [spaceHeader, ...spaceRows] = spaceSheet;
+  const [zoneHeader, ...zoneRows] = zoneSheet || [[], []];
+  const [componentHeader, ...componentRows] = componentSheet || [[], []];
 
-  // Build a simple tree: Facility > Floors > Spaces
+  // Helper: get column index safely
+  const colIdx = (header, col) => header.indexOf(col);
+
+  // Build a map of Zones if present
+  let zoneMap = {};
+  if (zoneSheet) {
+    // Map: ZoneName -> Zone object
+    zoneRows.forEach(row => {
+      const zone = {};
+      zoneHeader.forEach((h, i) => zone[h] = row[i]);
+      if (zone["Name"]) zoneMap[zone["Name"]] = zone;
+    });
+  }
+
+  // Build a map of Components by Space (normalize: trim + uppercase)
+  let componentsBySpace = {};
+  if (componentSheet) {
+    const spaceCol = componentHeader.includes("SpaceName") ? colIdx(componentHeader, "SpaceName") : colIdx(componentHeader, "Space");
+    componentRows.forEach(row => {
+      const comp = {};
+      componentHeader.forEach((h, i) => comp[h] = row[i]);
+      const rawSpaceName = row[spaceCol];
+      const spaceName = (rawSpaceName || '').trim().toUpperCase();
+      if (typeof window !== 'undefined') {
+        // eslint-disable-next-line no-console
+        console.log('Component row spaceCol value:', rawSpaceName, '-> normalized:', spaceName);
+      }
+      if (!componentsBySpace[spaceName]) componentsBySpace[spaceName] = [];
+      componentsBySpace[spaceName].push(comp);
+    });
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.log('componentsBySpace keys after build:', Object.keys(componentsBySpace));
+    }
+  }
+
+  // Build a map of Zones by Space (if Space has a Zone column)
+  let zoneBySpace = {};
+  if (spaceHeader.includes("Zone")) {
+    const zoneCol = colIdx(spaceHeader, "Zone");
+    spaceRows.forEach(row => {
+      const spaceName = row[spaceHeader.indexOf("Name")];
+      const zoneName = row[zoneCol];
+      if (zoneName) zoneBySpace[spaceName] = zoneName;
+    });
+  }
+
+  // Build the hierarchy
   const facilities = facilityRows.map(facRow => {
     const fac = {};
     facilityHeader.forEach((h, i) => fac[h] = facRow[i]);
-    fac.floors = floorRows
-      .filter(floorRow => floorRow[floorHeader.indexOf("FacilityName")] === fac["Name"])
-      .map(floorRow => {
-        const floor = {};
-        floorHeader.forEach((h, i) => floor[h] = floorRow[i]);
-        floor.spaces = spaceRows.filter(spaceRow => spaceRow[spaceHeader.indexOf("FloorName")] === floor["Name"]);
-        return floor;
-      });
+    // If Floor sheet has FacilityName column, filter by it. Otherwise, assign all floors (COBie standard)
+    const hasFacilityNameCol = floorHeader.includes("FacilityName");
+    fac.floors = (hasFacilityNameCol
+      ? floorRows.filter(floorRow => floorRow[floorHeader.indexOf("FacilityName")] === fac["Name"])
+      : floorRows
+    ).map(floorRow => {
+      const floor = {};
+      floorHeader.forEach((h, i) => floor[h] = floorRow[i]);
+      // Find spaces for this floor
+      floor.spaces = spaceRows
+        .filter(spaceRow => spaceRow[spaceHeader.indexOf("FloorName")] === floor["Name"])
+        .map(spaceRow => {
+          const space = {};
+          spaceHeader.forEach((h, i) => space[h] = spaceRow[i]);
+          const spaceName = (space["Name"] || '').trim().toUpperCase();
+          if (typeof window !== 'undefined') {
+            // eslint-disable-next-line no-console
+            console.log('Normalized spaceName:', spaceName, 'componentsBySpace[spaceName]:', componentsBySpace[spaceName]);
+          }
+          // If Zone sheet/column exists, nest under Zone
+          let children = [];
+          if (zoneSheet && zoneBySpace[spaceName]) {
+            const zoneName = zoneBySpace[spaceName];
+            let zoneObj = zoneMap[zoneName] ? { ...zoneMap[zoneName], components: [] } : { Name: zoneName, components: [] };
+            zoneObj.components = (componentsBySpace[spaceName] || []);
+            children.push(zoneObj);
+          } else {
+            space.components = (componentsBySpace[spaceName] || []);
+          }
+          if (children.length > 0) space.zones = children;
+          return space;
+        });
+      return floor;
+    });
     return fac;
   });
 
