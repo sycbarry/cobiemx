@@ -11,208 +11,14 @@ import { useRouter } from "next/navigation";
 import CytoscapeComponent from "react-cytoscapejs";
 import cytoscape from "cytoscape";
 import { FaCog, FaCheckCircle, FaTrash } from "react-icons/fa";
-
-function HierarchyTree({ hierarchy }: { hierarchy: any }) {
-  if (!hierarchy || hierarchy.error) return <div className="text-red-600">{hierarchy?.error || "No hierarchy data"}</div>;
-  if (hierarchy.facilities) {
-    return (
-      <div className="text-sm">
-        {hierarchy.facilities.map((fac: any) => (
-          <div key={fac.Name} className="mb-4">
-            <div className="font-semibold text-blue-700">🏢 {fac.Name}</div>
-            {fac.floors.map((floor: any) => (
-              <div key={floor.Name} className="ml-4 mb-2">
-                <div className="font-medium text-blue-500">🟦 {floor.Name}</div>
-                {floor.spaces && floor.spaces.length > 0 && (
-                  <ul className="ml-4 list-disc text-gray-700">
-                    {floor.spaces.map((space: any, idx: number) => (
-                      <li key={idx}>📄 {space[0] || space.Name || `Space ${idx+1}`}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (hierarchy.systems) {
-    return (
-      <div className="text-sm">
-        {hierarchy.systems.map((sys: any) => (
-          <div key={sys.Name} className="mb-4">
-            <div className="font-semibold text-green-700">🛠️ {sys.Name}</div>
-            {sys.components.map((comp: any) => (
-              <div key={comp.Name} className="ml-4 mb-2">
-                <div className="font-medium text-green-500">🔩 {comp.Name}</div>
-                {comp.assemblies && comp.assemblies.length > 0 && (
-                  <ul className="ml-4 list-disc text-gray-700">
-                    {comp.assemblies.map((asm: any, idx: number) => (
-                      <li key={idx}>⚙️ {asm[0] || asm.Name || `Assembly ${idx+1}`}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return <div>No hierarchy data</div>;
-}
-
-function GraphNode({ data }: any) {
-  return (
-    <div className="rounded shadow bg-white border px-4 py-2 text-xs max-w-xs cursor-pointer">
-      <div className="font-bold text-blue-700 truncate">{data.label}</div>
-      {data.hovered && (
-        <div className="mt-2 p-2 bg-gray-50 border rounded text-gray-700 text-xs">
-          {Object.entries(data.meta).map(([k, v]) => (
-            <div key={k}><span className="font-semibold text-gray-600">{k}:</span> {String(v)}</div>
-          ))}
-        </div>
-      )}
-      <Handle type="target" position={Position.Top} />
-      <Handle type="source" position={Position.Bottom} />
-    </div>
-  );
-}
+import ReactDOM from 'react-dom';
+import HierarchyTree from "./HierarchyTree";
+import GraphNode from "./GraphNode";
+import SystemDrilldownTree from "./SystemDrilldownTree";
+import PopoutPortal from "./PopoutPortal";
 
 // Define nodeTypes outside the component to avoid React Flow warning
 const nodeTypes = { default: GraphNode };
-
-// Drilldown tree for System > Assembly > Subassembly > Component (with single expanded state)
-function SystemDrilldownTree({ hierarchy }: { hierarchy: any }) {
-  const [expanded, setExpanded] = useState<{ [key: string]: boolean }>({});
-
-  const toggle = useCallback((id: string) => {
-    setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
-  }, []);
-
-  if (!hierarchy || !hierarchy.systems) return <div className="text-red-600">No system hierarchy data</div>;
-
-  // Flatten all assemblies for easier lookup
-  const allAssemblies: any[] = [];
-  hierarchy.systems.forEach((sys: any) => {
-    sys.components.forEach((comp: any) => {
-      if (comp.assemblies) {
-        comp.assemblies.forEach((asm: any) => {
-          allAssemblies.push({ ...asm, ComponentName: comp.Name });
-        });
-      }
-    });
-  });
-
-  // Helper to recursively render assemblies and subassemblies
-  function renderAssemblies(assemblies: any[], allAssemblies: any[], level = 0, parentId = '') {
-    return (
-      <ul className={level === 0 ? "ml-2" : "ml-6"}>
-        {assemblies.map((asm: any, idx: number) => {
-          const id = `${parentId}asm-${asm.Name}-${idx}`;
-          // Find subassemblies: assemblies whose ParentName is this assembly's Name
-          const subassemblies = allAssemblies.filter((a: any) => a.ParentName === asm.Name && a.ComponentName !== asm.ComponentName);
-          // Find components: assemblies whose ParentName is this assembly's Name and have a ChildName that is a component
-          const components = allAssemblies.filter((a: any) => a.ParentName === asm.Name && a.ComponentName === asm.ComponentName && a.ChildName);
-          return (
-            <li key={`${asm.Name}-${idx}`} className="mb-2">
-              <div
-                className="flex items-center gap-2 cursor-pointer group py-1 px-1 rounded hover:bg-yellow-50 transition"
-                onClick={() => toggle(id)}
-                style={{ minWidth: 120 }}
-              >
-                <span className="text-lg select-none transition-transform" style={{ display: 'inline-block', transform: expanded[id] ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                  ▶
-                </span>
-                <span className="font-semibold text-yellow-700 text-base">{asm.Name}</span>
-                {subassemblies.length > 0 && <span className="text-xs text-orange-500 ml-1">({subassemblies.length} subassemblies)</span>}
-                {components.length > 0 && <span className="text-xs text-purple-500 ml-1">({components.length} components)</span>}
-              </div>
-              {expanded[id] && (
-                <div className="ml-6 border-l border-yellow-100 pl-3 mt-1">
-                  {subassemblies.length > 0 && (
-                    <div className="mb-1">
-                      <div className="text-xs text-orange-600 font-bold mb-1">Subassemblies:</div>
-                      {renderAssemblies(subassemblies, allAssemblies, level + 1, id + '-')}
-                    </div>
-                  )}
-                  {components.length > 0 && (
-                    <div className="mb-1">
-                      <div className="text-xs text-purple-700 font-bold mb-1">Components:</div>
-                      <ul>
-                        {components.map((comp: any, cidx: number) => (
-                          <li key={`${comp.ChildName}-${cidx}`} className="text-purple-700 ml-2 py-0.5">{comp.ChildName}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  }
-
-  // Helper to render components directly under a system
-  function renderComponents(components: any[], parentId = '') {
-    return (
-      <ul className="ml-4">
-        {components.map((comp: any, idx: number) => (
-          <li key={`${comp.Name}-${idx}`} className="text-purple-700 mb-1 py-0.5 pl-1 hover:bg-purple-50 rounded transition">{comp.Name}</li>
-        ))}
-      </ul>
-    );
-  }
-
-  return (
-    <div className="text-base font-sans">
-      {hierarchy.systems.map((sys: any, idx: number) => {
-        const id = `sys-${sys.Name}-${idx}`;
-        // Top-level assemblies for this system
-        const assemblies: any[] = [];
-        sys.components.forEach((comp: any) => {
-          if (comp.assemblies) {
-            comp.assemblies.forEach((asm: any) => {
-              // Only top-level assemblies (no parent in this list)
-              if (!allAssemblies.some(a => a.ChildName === asm.Name)) {
-                assemblies.push({ ...asm, ComponentName: comp.Name });
-              }
-            });
-          }
-        });
-        return (
-          <div key={`${sys.Name}-${idx}`} className="mb-6">
-            <div
-              className="flex items-center gap-2 cursor-pointer group py-2 px-2 rounded-lg hover:bg-blue-50 transition"
-              onClick={() => toggle(id)}
-              style={{ minWidth: 180 }}
-            >
-              <span className="text-xl select-none transition-transform" style={{ display: 'inline-block', transform: expanded[id] ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                ▶
-              </span>
-              <span className="font-extrabold text-green-700 text-lg tracking-tight">{sys.Name}</span>
-              {assemblies.length > 0 && <span className="text-xs text-yellow-600 ml-2">({assemblies.length} assemblies)</span>}
-              {assemblies.length === 0 && sys.components.length > 0 && <span className="text-xs text-purple-600 ml-2">({sys.components.length} components)</span>}
-            </div>
-            {expanded[id] && (
-              <div className="ml-7 border-l-2 border-blue-100 pl-4 mt-2">
-                {assemblies.length > 0
-                  ? renderAssemblies(assemblies, allAssemblies, 0, id + '-')
-                  : sys.components.length > 0
-                    ? renderComponents(sys.components, id + '-')
-                    : <div className="text-gray-400 text-sm ml-2">No assemblies or components</div>
-                }
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 export default function SpreadsheetPage() {
   const { file } = useFileUpload();
@@ -236,15 +42,15 @@ export default function SpreadsheetPage() {
   // For graph node hover
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [modalWidth, setModalWidth] = useState<number>(1200);
-  const [modalHeight, setModalHeight] = useState<number>(600);
+  const [modalHeight, setModalHeight] = useState<number>(850);
   const [isDragging, setIsDragging] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   // System filter state for the graph
-  const [selectedSystem, setSelectedSystem] = useState<string | null>(null);
+  const [selectedSystem, setSelectedSystem] = useState<string[]>([]);
   const [selectedAssemblies, setSelectedAssemblies] = useState<string[]>([]);
   const [selectedSubassemblies, setSelectedSubassemblies] = useState<string[]>([]);
-  const [selectedComponent, setSelectedComponent] = useState<string | null>(null);
+  const [selectedComponent, setSelectedComponent] = useState<string[]>([]);
   // Sidebar state
   const [showSidebar, setShowSidebar] = useState(false);
   // DB2 connection form state
@@ -285,6 +91,39 @@ export default function SpreadsheetPage() {
   const queryRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<'cobie' | 'query' | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  // Add state for loading
+  const [showHierarchyLoading, setShowHierarchyLoading] = useState(false);
+  // Add state for showing dropdowns
+  const [showSystemDropdown, setShowSystemDropdown] = useState(false);
+  const [showAssemblyDropdown, setShowAssemblyDropdown] = useState(false);
+  const [showSubassemblyDropdown, setShowSubassemblyDropdown] = useState(false);
+  const [showComponentDropdown, setShowComponentDropdown] = useState(false);
+  // Add refs for each button
+  const systemBtnRef = useRef<HTMLButtonElement | null>(null);
+  const assemblyBtnRef = useRef<HTMLButtonElement | null>(null);
+  const subassemblyBtnRef = useRef<HTMLButtonElement | null>(null);
+  const componentBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Add pending selection state for each control
+  const [pendingSystem, setPendingSystem] = useState<string[]>(selectedSystem);
+  const [pendingAssemblies, setPendingAssemblies] = useState(selectedAssemblies);
+  const [pendingSubassemblies, setPendingSubassemblies] = useState(selectedSubassemblies);
+  const [pendingComponent, setPendingComponent] = useState(selectedComponent);
+  // Sync pending state with actual state when popouts open/close
+  useEffect(() => { setPendingSystem(selectedSystem); }, [showSystemDropdown]);
+  useEffect(() => { setPendingAssemblies(selectedAssemblies); }, [showAssemblyDropdown]);
+  useEffect(() => { setPendingSubassemblies(selectedSubassemblies); }, [showSubassemblyDropdown]);
+  useEffect(() => { setPendingComponent(selectedComponent); }, [showComponentDropdown]);
+  // Add search state hooks near other state hooks:
+  const [systemSearch, setSystemSearch] = useState("");
+  const [assemblySearch, setAssemblySearch] = useState("");
+  const [subassemblySearch, setSubassemblySearch] = useState("");
+  const [componentSearch, setComponentSearch] = useState("");
+  // Add state for selected component node
+  const [selectedComponentNode, setSelectedComponentNode] = useState<any>(null);
+  const [isolatedNodeId, setIsolatedNodeId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string | null; nodeData?: any; nodeType?: string } | null>(null);
+  const [showControls, setShowControls] = useState(true);
+  const [selectedNodeDetails, setSelectedNodeDetails] = useState<any>(null);
 
   // Update modal width on window resize
   useEffect(() => {
@@ -378,41 +217,42 @@ export default function SpreadsheetPage() {
   }, [hierarchyType, hierarchy]);
 
   const openHierarchy = () => {
-    let hierarchyResult;
-    if (hierarchyType === 'facility') {
-      hierarchyResult = buildCobieHierarchy({
-        [facilityTab]: allSheets[facilityTab],
-        [floorTab]: allSheets[floorTab],
-        [spaceTab]: allSheets[spaceTab],
-      });
-    } else if (hierarchyType === 'system') {
-      hierarchyResult = buildCobieSystemHierarchy({
-        [systemTab]: allSheets[systemTab],
-        [componentTab]: allSheets[componentTab],
-        [assemblyTab]: allSheets[assemblyTab],
-      });
-    } else {
-      hierarchyResult = buildCobieGraphHierarchy({
-        [systemTab]: allSheets[systemTab],
-        [componentTab]: allSheets[componentTab],
-        [assemblyTab]: allSheets[assemblyTab],
-        [facilityTab]: allSheets[facilityTab],
-        [floorTab]: allSheets[floorTab],
-        [spaceTab]: allSheets[spaceTab],
-        Component: allSheets[componentTab],
-        Assembly: allSheets[assemblyTab],
-      });
-      // Log the graph data for debugging
-      if (hierarchyResult && typeof hierarchyResult === 'object' && 'nodes' in hierarchyResult && 'edges' in hierarchyResult) {
-        // eslint-disable-next-line no-console
-        console.log('Graph Nodes (on open):', hierarchyResult.nodes);
-        // eslint-disable-next-line no-console
-        console.log('Graph Edges (on open):', hierarchyResult.edges);
+    setShowHierarchyLoading(true);
+    setTimeout(() => {
+      let hierarchyResult;
+      if (hierarchyType === 'facility') {
+        hierarchyResult = buildCobieHierarchy({
+          [facilityTab]: allSheets[facilityTab],
+          [floorTab]: allSheets[floorTab],
+          [spaceTab]: allSheets[spaceTab],
+        });
+      } else if (hierarchyType === 'system') {
+        hierarchyResult = buildCobieSystemHierarchy({
+          [systemTab]: allSheets[systemTab],
+          [componentTab]: allSheets[componentTab],
+          [assemblyTab]: allSheets[assemblyTab],
+        });
+      } else {
+        hierarchyResult = buildCobieGraphHierarchy({
+          [systemTab]: allSheets[systemTab],
+          [componentTab]: allSheets[componentTab],
+          [assemblyTab]: allSheets[assemblyTab],
+          [facilityTab]: allSheets[facilityTab],
+          [floorTab]: allSheets[floorTab],
+          [spaceTab]: allSheets[spaceTab],
+          Component: allSheets[componentTab],
+          Assembly: allSheets[assemblyTab],
+        });
       }
-    }
-    setHierarchy(hierarchyResult);
-    setShowHierarchy(true);
+      setHierarchy(hierarchyResult);
+      setShowHierarchy(true);
+    }, 0);
   };
+
+  // Hide loading when modal shows
+  useEffect(() => {
+    if (showHierarchy) setShowHierarchyLoading(false);
+  }, [showHierarchy]);
 
   // Build React Flow nodes/edges for graph hierarchy
   const graphElements = useMemo(() => {
@@ -490,8 +330,42 @@ export default function SpreadsheetPage() {
   // Filtered elements for Cytoscape
   const filteredCyElements = useMemo(() => {
     if (hierarchyType !== 'graph' || !hierarchy || !('nodes' in hierarchy) || !('edges' in hierarchy)) return [];
+    // Isolate mode: if isolatedNodeId is set, show only the subgraph rooted at that node (any type)
+    if (isolatedNodeId) {
+      // Find all descendants (BFS)
+      const nodeIds = new Set<string>();
+      const edgeIds = new Set<string>();
+      // Find path to root (walk up edges)
+      let currentId = isolatedNodeId;
+      while (true) {
+        nodeIds.add(currentId);
+        const parentEdge = hierarchy.edges.find((e: any) => e.target === currentId);
+        if (parentEdge) {
+          edgeIds.add(parentEdge.id);
+          currentId = parentEdge.source;
+        } else {
+          break;
+        }
+      }
+      // Walk down descendants (BFS)
+      const queue = [isolatedNodeId];
+      while (queue.length > 0) {
+        const nid = queue.shift()!;
+        nodeIds.add(nid);
+        hierarchy.edges.forEach((e: any) => {
+          if (e.source === nid) {
+            edgeIds.add(e.id);
+            if (!nodeIds.has(e.target)) queue.push(e.target);
+          }
+        });
+      }
+      const nodes = cyElements.filter((el: any) => el.data && nodeIds.has(el.data.id));
+      const edges = cyElements.filter((el: any) => el.data && el.data.source && edgeIds.has(el.data.id))
+        .map((el: any) => ({ ...el, classes: (el.classes || '') + ' highlighted-edge' }));
+      return [...nodes, ...edges];
+    }
     // If no filters, show all
-    if (!selectedSystem && selectedAssemblies.length === 0 && selectedSubassemblies.length === 0 && !selectedComponent) {
+    if (selectedSystem.length === 0 && selectedAssemblies.length === 0 && selectedSubassemblies.length === 0 && selectedComponent.length === 0) {
       return cyElements;
     }
     // Build set of node ids to keep
@@ -514,8 +388,10 @@ export default function SpreadsheetPage() {
       relatedNodeIds.forEach(id => nodeIds.add(id));
     };
     // System filter
-    if (selectedSystem) {
-      addReachable(`sys-${selectedSystem}`);
+    if (selectedSystem.length > 0) {
+      selectedSystem.forEach(name => {
+        addReachable(`sys-${name}`);
+      });
     }
     // Assembly filter (multi)
     selectedAssemblies.forEach(name => {
@@ -525,26 +401,26 @@ export default function SpreadsheetPage() {
     selectedSubassemblies.forEach(name => {
       addReachable(`asm-${name}`);
     });
-    // Component filter (single, isolates just that component and its direct edges)
-    if (selectedComponent) {
-      nodeIds.add(`comp-${selectedComponent}`);
+    // Component filter (multi, isolates just that component and its direct edges)
+    selectedComponent.forEach(name => {
+      nodeIds.add(`comp-${name}`);
       hierarchy.edges.forEach((e: any) => {
-        if (e.source === `comp-${selectedComponent}` || e.target === `comp-${selectedComponent}`) {
+        if (e.source === `comp-${name}` || e.target === `comp-${name}`) {
           edgeIds.add(e.id);
           nodeIds.add(e.source);
           nodeIds.add(e.target);
         }
       });
-    }
+    });
     // Filter nodes and edges
     const nodes = cyElements.filter((el: any) => el.data && nodeIds.has(el.data.id));
     const edges = cyElements.filter((el: any) => el.data && el.data.source && edgeIds.has(el.data.id))
       .map((el: any) => ({ ...el, classes: (el.classes || '') + ' highlighted-edge' }));
     return [...nodes, ...edges];
-  }, [cyElements, hierarchy, hierarchyType, selectedSystem, selectedAssemblies, selectedSubassemblies, selectedComponent]);
+  }, [cyElements, hierarchy, hierarchyType, selectedSystem, selectedAssemblies, selectedSubassemblies, selectedComponent, isolatedNodeId]);
 
   // Add a key to force CytoscapeComponent to re-render and re-layout when filter changes
-  const cyKey = useMemo(() => `cy-${selectedSystem || ''}-${selectedAssemblies.join(',')}-${selectedSubassemblies.join(',')}-${selectedComponent || ''}`,
+  const cyKey = useMemo(() => `cy-${selectedSystem.join(',')}-${selectedAssemblies.join(',')}-${selectedSubassemblies.join(',')}-${selectedComponent.join(',')}-${selectedComponent.length}`,
     [selectedSystem, selectedAssemblies, selectedSubassemblies, selectedComponent]);
 
   const handleDb2Input = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -649,6 +525,8 @@ export default function SpreadsheetPage() {
       const rect = ref.getBoundingClientRect();
       setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     }
+    // Prevent text selection while dragging
+    document.body.style.userSelect = 'none';
   };
   const handleDrag = (e: React.MouseEvent) => {
     if (!dragging) return;
@@ -657,13 +535,16 @@ export default function SpreadsheetPage() {
     const bounds = modal.getBoundingClientRect();
     let x = e.clientX - bounds.left - dragOffset.x;
     let y = e.clientY - bounds.top - dragOffset.y;
-    // Clamp to modal bounds
+    // Clamp to modal bounds (with some margin)
     x = Math.max(0, Math.min(x, bounds.width - 380));
     y = Math.max(0, Math.min(y, bounds.height - 80));
     if (dragging === 'cobie') setCobiePos({ x, y });
     if (dragging === 'query') setQueryPos({ x, y });
   };
-  const handleDragEnd = () => setDragging(null);
+  const handleDragEnd = () => {
+    setDragging(null);
+    document.body.style.userSelect = '';
+  };
 
   // Add handler for running the query
   const handleRunQuery = useCallback(async () => {
@@ -705,6 +586,57 @@ export default function SpreadsheetPage() {
     setQueryLoading(false);
   }, [sqlInput, activeSessionId, connections]);
 
+  // Add a click handler to close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      setShowSystemDropdown(false);
+      setShowAssemblyDropdown(false);
+      setShowSubassemblyDropdown(false);
+      setShowComponentDropdown(false);
+    };
+    if (showSystemDropdown || showAssemblyDropdown || showSubassemblyDropdown || showComponentDropdown) {
+      document.addEventListener('click', handleClick);
+    }
+    return () => {
+      document.removeEventListener('click', handleClick);
+    };
+  }, [showSystemDropdown, showAssemblyDropdown, showSubassemblyDropdown, showComponentDropdown]);
+
+  // Place this before the return statement in SpreadsheetPage:
+  const sortedComponentNames = [
+    ...pendingComponent,
+    ...(allComponentNames.filter((name: string) => !pendingComponent.includes(name)))
+  ];
+
+  // Helper to get path to root for a nodeId
+  function getPathToRoot(nodeId: string): any[] {
+    if (!hierarchy || !('nodes' in hierarchy) || !('edges' in hierarchy)) return [];
+    const nodesById = Object.fromEntries(hierarchy.nodes.map((n: any) => [n.id, n]));
+    const path = [];
+    let currentId = nodeId;
+    while (currentId && nodesById[currentId]) {
+      path.unshift(nodesById[currentId]);
+      const parentEdge = hierarchy.edges.find((e: any) => e.target === currentId);
+      if (parentEdge) {
+        currentId = parentEdge.source;
+      } else {
+        break;
+      }
+    }
+    return path;
+  }
+
+  if (file && !workbook) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div className="animate-spin" style={{ fontSize: 64, marginBottom: 24 }}>🔄</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#2563eb' }}>Extracting COBie Data...</div>
+          <div style={{ fontSize: 16, color: '#555', marginTop: 12 }}>Please wait while your spreadsheet is processed.</div>
+        </div>
+      </div>
+    );
+  }
   if (!file) {
     return null;
   }
@@ -712,103 +644,142 @@ export default function SpreadsheetPage() {
     return <div className="text-red-600 p-8 bg-gray-50">{error}</div>;
   }
   return (
-    <div className="min-h-screen w-full bg-gray-50 py-10 px-0 font-sans">
+    <div className="h-screen w-full bg-gray-50 px-0 pt-6 font-sans flex flex-col">
       {/* Tab Bar at the Top */}
-      <div className="w-full bg-gradient-to-r from-gray-100 via-white to-gray-100 border-b border-gray-200 px-8 flex items-center gap-0 shadow-sm rounded-b-2xl" style={{minHeight: 60}}>
+      <div className="w-full bg-gradient-to-r from-gray-100 via-white to-gray-100 border-b border-gray-200 px-8 flex items-center gap-0 shadow-sm rounded-b-2xl" style={{minHeight: 44}}>
         <button
-          className={`px-8 py-3 font-bold text-lg rounded-t-xl border-b-4 transition-all duration-150 focus:outline-none ${activeTab === 'cobie' ? 'border-blue-600 bg-white text-blue-800 shadow' : 'border-transparent text-gray-500 hover:bg-gray-100'}`}
+          className={`px-4 py-2 font-semibold text-base rounded-t-xl border-b-4 transition-all duration-150 focus:outline-none ${activeTab === 'cobie' ? 'border-blue-600 bg-white text-blue-800 shadow' : 'border-transparent text-gray-500 hover:bg-gray-100'}`}
           onClick={() => setActiveTab('cobie')}
         >
           COBie Sheet Viewer
         </button>
         <button
-          className={`px-8 py-3 font-bold text-lg rounded-t-xl border-b-4 transition-all duration-150 focus:outline-none ${activeTab === 'maximo' ? 'border-blue-600 bg-white text-blue-800 shadow' : 'border-transparent text-gray-500 hover:bg-gray-100'}`}
+          className={`px-4 py-2 font-semibold text-base rounded-t-xl border-b-4 transition-all duration-150 focus:outline-none ${activeTab === 'maximo' ? 'border-blue-600 bg-white text-blue-800 shadow' : 'border-transparent text-gray-500 hover:bg-gray-100'}`}
           onClick={() => setActiveTab('maximo')}
         >
           Maximo Connections
         </button>
       </div>
-      <div className="w-full max-w-[1800px] mx-auto flex flex-col h-[80vh]">
+      <div className="w-full mx-auto flex flex-col flex-1 min-h-0 h-full">
         {activeTab === 'cobie' && (
-          <header className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-6 px-8">
+          <header className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 gap-3 px-6">
             <div>
-              <h1 className="text-4xl font-extrabold text-blue-800 mb-2 tracking-tight drop-shadow-sm">COBie Maximo Cross Validation</h1>
+              <h1 className="text-2xl font-bold text-blue-800 mb-1 tracking-tight">COBie Maximo Cross Validation</h1>
             </div>
-            <div className="flex flex-col gap-3 items-end mt-6">
+            <div className="flex flex-col gap-2 items-end mt-2">
               {/* Segmented control for hierarchy type */}
-              <div className="flex gap-0.5 rounded-full overflow-hidden border border-gray-200 bg-gray-50 shadow-sm mb-2">
+              <div className="flex gap-0.5 rounded-full overflow-hidden border border-gray-200 bg-gray-50 shadow-sm mb-1" style={{ minHeight: 32 }}>
                 <button
-                  className={`px-6 py-2 font-bold text-base transition-colors focus:outline-none rounded-full ${hierarchyType === 'facility' ? 'bg-blue-600 text-white shadow' : 'bg-transparent text-blue-700 hover:bg-blue-100'}`}
+                  className={`px-3 py-1 font-semibold text-sm rounded-full transition-all focus:outline-none ${hierarchyType === 'facility' ? 'bg-blue-600 text-white' : 'bg-transparent text-blue-700 hover:bg-blue-100'}`}
                   onClick={() => setHierarchyType('facility')}
+                  style={{ minWidth: 70 }}
                 >
                   Facility
                 </button>
                 <button
-                  className={`px-6 py-2 font-bold text-base transition-colors focus:outline-none rounded-full ${hierarchyType === 'system' ? 'bg-green-600 text-white shadow' : 'bg-transparent text-green-700 hover:bg-green-100'}`}
+                  className={`px-3 py-1 font-semibold text-sm rounded-full transition-all focus:outline-none ${hierarchyType === 'system' ? 'bg-green-600 text-white' : 'bg-transparent text-green-700 hover:bg-green-100'}`}
                   onClick={() => setHierarchyType('system')}
+                  style={{ minWidth: 70 }}
                 >
                   System
                 </button>
                 <button
-                  className={`px-6 py-2 font-bold text-base transition-colors focus:outline-none rounded-full ${hierarchyType === 'graph' ? 'bg-purple-600 text-white shadow' : 'bg-transparent text-purple-700 hover:bg-purple-100'}`}
+                  className={`px-3 py-1 font-semibold text-sm rounded-full transition-all focus:outline-none ${hierarchyType === 'graph' ? 'bg-purple-600 text-white' : 'bg-transparent text-purple-700 hover:bg-purple-100'}`}
                   onClick={() => setHierarchyType('graph')}
+                  style={{ minWidth: 70 }}
                 >
                   Graph
                 </button>
               </div>
               {/* Dropdowns and Show Hierarchy button in a row */}
-              <div className="flex flex-row gap-3 items-center mt-1">
+              <div className="flex flex-row gap-2 items-end mt-0">
                 {hierarchyType === 'facility' ? (
                   <>
-                    <select value={facilityTab} onChange={e => setFacilityTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                    <select value={floorTab} onChange={e => setFloorTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                    <select value={spaceTab} onChange={e => setSpaceTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-blue-700 mb-0.5">Facility</label>
+                      <select value={facilityTab} onChange={e => setFacilityTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-blue-700 mb-0.5">Floor</label>
+                      <select value={floorTab} onChange={e => setFloorTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-blue-700 mb-0.5">Space</label>
+                      <select value={spaceTab} onChange={e => setSpaceTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
                   </>
                 ) : hierarchyType === 'system' ? (
                   <>
-                    <select value={systemTab} onChange={e => setSystemTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                    <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                    <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-green-700 mb-0.5">System</label>
+                      <input
+                        type="text"
+                        className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 min-w-[90px]"
+                        placeholder="Search..."
+                        value={systemSearch}
+                        onChange={e => setSystemSearch(e.target.value)}
+                        style={{ minWidth: 0 }}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-green-700 mb-0.5">Component</label>
+                      <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-green-700 mb-0.5">Assembly</label>
+                      <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-blue-400 focus:border-blue-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
                   </>
                 ) : (
                   <>
-                    <select value={systemTab} onChange={e => setSystemTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                    <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                    <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all">
-                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-purple-700 mb-0.5">System</label>
+                      <select value={systemTab} onChange={e => setSystemTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-purple-400 focus:border-purple-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-purple-700 mb-0.5">Component</label>
+                      <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-purple-400 focus:border-purple-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="font-medium text-xs text-purple-700 mb-0.5">Assembly</label>
+                      <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-xs shadow-sm focus:ring-1 focus:ring-purple-400 focus:border-purple-400 transition min-w-[90px]">
+                        {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </div>
                   </>
                 )}
                 <button
-                  className="ml-2 px-7 py-2 bg-blue-600 text-white rounded-xl shadow font-bold text-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="ml-2 px-3 py-1 text-xs font-semibold rounded bg-blue-600 text-white shadow hover:bg-blue-700 transition min-w-[90px]"
                   onClick={openHierarchy}
+                  disabled={showHierarchyLoading}
+                  style={{ height: 32 }}
                 >
-                  Show Hierarchy
+                  {showHierarchyLoading ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-blue-400 rounded-full animate-spin inline-block align-middle mr-1"></span>
+                  ) : 'Show Hierarchy'}
                 </button>
               </div>
             </div>
           </header>
         )}
         {activeTab === 'cobie' && (
-          <div className="w-full px-8 flex-1 flex flex-col min-h-0">
+          <div className="w-full flex-1 flex flex-col min-h-0 h-full">
             <div className="mb-4 border-b border-gray-200">
-              <nav className="flex flex-wrap gap-2" aria-label="Tabs">
+              <nav className="flex flex-wrap gap-2" style={{padding: '0 16px'}} aria-label="Tabs">
                 {sheetNames.map((name) => (
                   <button
                     key={name}
@@ -825,20 +796,20 @@ export default function SpreadsheetPage() {
                 ))}
               </nav>
             </div>
-            <div className="border rounded-2xl shadow-lg overflow-auto bg-white flex-1 min-h-0" style={{ minHeight: 0, width: '100%' }}>
-              <div className="w-full h-full" style={{ background: '#fff', borderRadius: 18, boxShadow: '0 4px 16px 0 rgba(0,0,0,0.06)', height: '100%', minWidth: 900 }}>
+            <div className="shadow-lg overflow-auto bg-white flex-1 min-h-0 h-full" style={{ minHeight: 0, width: '100vw', maxWidth: '100vw' }}>
+              <div className="w-full h-full flex-1" style={{ background: '#fff', boxShadow: '0 4px 16px 0 rgba(0,0,0,0.06)', height: '100%', minWidth: 0, width: '100vw', maxWidth: '100vw', borderRadius: 0 }}>
                 <DataGrid
                   columns={resizableColumns}
                   rows={rows}
                   className="rdg-light google-sheets-style"
                   style={{
-                    minWidth: 1200,
+                    width: '100vw',
+                    maxWidth: '100vw',
+                    height: '100%',
                     fontFamily: 'Inter, Roboto, Arial, sans-serif',
                     fontSize: 15,
-                    borderRadius: 18,
-                    border: '1.5px solid #e0e7ef',
+                    borderRadius: 0,
                     boxShadow: '0 4px 16px 0 rgba(0,0,0,0.06)',
-                    height: '100%',
                   }}
                   rowHeight={36}
                   headerRowHeight={40}
@@ -1078,12 +1049,15 @@ export default function SpreadsheetPage() {
       {showHierarchy && (
         <div className="fixed inset-0 z-50 flex items-end select-none">
           {/* Overlay */}
-          <div className="fixed inset-0 bg-black/30 transition-opacity" onClick={() => setShowHierarchy(false)} />
+          <div className="fixed inset-0 bg-black/20 transition-opacity" onClick={() => setShowHierarchy(false)} style={dragging ? { pointerEvents: 'none' } : {}} />
           {/* Bottom Modal */}
           <div
             ref={modalRef}
-            className="relative w-full bg-white shadow-2xl p-8 animate-slide-in-bottom flex flex-col rounded-t-2xl"
-            style={{ height: modalHeight, maxHeight: '90vh', minHeight: 400, margin: 0 }}
+            className="relative w-full bg-white border border-gray-300 p-4 animate-slide-in-bottom flex flex-col"
+            style={{ height: modalHeight, maxHeight: '90vh', minHeight: 400, margin: 0, borderRadius: 0, boxShadow: 'none' }}
+            onMouseMove={handleDrag}
+            onMouseUp={handleDragEnd}
+            onMouseLeave={handleDragEnd}
           >
             {/* Drag handle */}
             <div
@@ -1094,7 +1068,7 @@ export default function SpreadsheetPage() {
                 e.preventDefault();
               }}
             >
-              <div className="w-24 h-2 mt-2 bg-gray-300 rounded-full" />
+              <div className="w-24 h-2 mt-2 bg-gray-200" />
             </div>
             {/* Drag logic */}
             {isDragging && (
@@ -1112,277 +1086,526 @@ export default function SpreadsheetPage() {
               />
             )}
             <button
-              className="absolute top-6 right-6 text-gray-400 hover:text-gray-700 text-3xl font-bold"
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-2xl font-bold"
               onClick={() => setShowHierarchy(false)}
               aria-label="Close"
+              style={{ background: 'none', border: 'none', padding: 0 }}
             >
               &times;
             </button>
-            <div className="flex items-center gap-4 mb-6 mt-4">
-              <h2 className="text-2xl font-semibold text-blue-700 mb-0">COBie Hierarchy</h2>
+            <div className="flex items-center justify-between gap-4 mb-4 mt-2 border-b border-gray-200 pb-2">
+              <h2 className="text-xl font-semibold text-gray-800 mb-0">COBie Hierarchy</h2>
+              <button
+                className="px-3 py-1 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition-colors z-20"
+                style={{ fontSize: 14 }}
+                onClick={() => setShowControls(v => !v)}
+              >
+                {showControls ? 'Hide Controls' : 'Show Controls'}
+              </button>
             </div>
             {hierarchyType === 'graph' ? (
-              <div
-                style={{ width: '100%', height: modalHeight - 120, position: 'relative' }}
-                onMouseMove={handleDrag}
-                onMouseUp={handleDragEnd}
-                onMouseLeave={handleDragEnd}
-              >
+              <div style={{ width: '100%', height: modalHeight - 90, position: 'relative' }}>
                 {/* Draggable COBie Hierarchy Toolbox */}
-                <div
-                  ref={cobieRef}
-                  className="absolute z-30 p-5 bg-white/95 border border-gray-200 rounded-2xl shadow-xl overflow-auto cursor-grab"
-                  style={{ left: cobiePos.x, top: cobiePos.y, minWidth: 370, maxWidth: 520, maxHeight: modalHeight - 140, fontFamily: 'Inter, Roboto, Arial, sans-serif', boxShadow: '0 8px 32px 0 rgba(0,0,0,0.14)' }}
-                >
+                {showControls && (
                   <div
-                    className="w-full h-6 mb-2 cursor-grab rounded-t-xl bg-blue-100 flex items-center px-2 text-blue-700 font-bold text-xs select-none"
-                    onMouseDown={e => handleDragStart('cobie', e)}
+                    ref={cobieRef}
+                    className="absolute z-30 p-3 bg-white border border-gray-300 overflow-auto cursor-grab"
+                    style={{ left: cobiePos.x, top: cobiePos.y, minWidth: 320, maxWidth: 480, maxHeight: modalHeight - 120, borderRadius: 0, boxShadow: 'none' }}
                   >
-                    COBie Hierarchy Controls
-                  </div>
-                  <div className="flex flex-col gap-4">
-                    {/* System */}
-                    <div>
-                      <label className="font-bold text-blue-700 text-sm mb-1 block">System</label>
-                      <div className="flex items-center gap-2">
-                        <select
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all shadow-sm hover:border-blue-400"
-                          value={selectedSystem || ''}
-                          onChange={e => setSelectedSystem(e.target.value || null)}
-                        >
-                          <option value="">All</option>
-                          {(allSystemNames as string[]).map((name, idx) => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
-                        </select>
-                        <button
-                          className="text-xs text-blue-500 underline self-end hover:text-blue-700 disabled:text-gray-300"
-                          onClick={() => setSelectedSystem(null)}
-                          disabled={!selectedSystem}
-                        >Clear</button>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="w-full h-6 cursor-grab border-b border-gray-200 flex items-center px-2 text-gray-700 font-bold text-xs select-none bg-white" onMouseDown={e => handleDragStart('cobie', e)} style={{ borderRadius: 0 }}>
+                        COBie Hierarchy Controls
                       </div>
                     </div>
-                    {/* Assembly */}
-                    <div>
-                      <label className="font-bold text-yellow-700 text-sm mb-1 block">Assembly</label>
-                      <div className="flex items-center gap-2">
-                        <select
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 transition-all shadow-sm hover:border-yellow-400"
-                          multiple
-                          size={Math.min(4, (allAssemblyNames as string[]).length)}
-                          value={selectedAssemblies}
-                          onChange={e => {
-                            const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
-                            setSelectedAssemblies(options);
+                    <div className="flex flex-col gap-2 text-base" style={{ minWidth: 320, maxWidth: 400, padding: 12 }}>
+                      {/* System */}
+                      <div className="flex flex-col gap-1">
+                        <label className="font-semibold text-blue-700">System</label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
+                            placeholder="Search..."
+                            value={systemSearch}
+                            onChange={e => setSystemSearch(e.target.value)}
+                            style={{ minWidth: 0 }}
+                          />
+                          <button
+                            ref={systemBtnRef}
+                            type="button"
+                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 hover:border-blue-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                            style={{ boxShadow: 'none', minWidth: 0 }}
+                            onClick={() => setShowSystemDropdown(v => !v)}
+                          >
+                            <span className="truncate">{selectedSystem.length === 0 ? 'All' : selectedSystem.join(', ')}</span>
+                            <span className="ml-1">▼</span>
+                          </button>
+                          <PopoutPortal anchorRef={systemBtnRef} show={showSystemDropdown}>
+                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                              <div className="flex justify-between mb-2">
+                                <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingSystem(allSystemNames as string[])}>Select All</button>
+                                <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingSystem([])}>Clear All</button>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                {hierarchy && 'nodes' in hierarchy && Array.isArray(hierarchy.nodes) && (hierarchy.nodes as any[]).filter((n: any) => n.type === 'system').filter((n: any) => n.data.Name && n.data.Name.toLowerCase().includes(systemSearch.toLowerCase())).map((n: any, idx: number) => {
+                                  const name = n.data.Name;
+                                  const compNames = (n.data.ComponentNames || '').split(';').map((s: string) => s.trim()).filter(Boolean);
+                                  let compSummary = '';
+                                  if (compNames.length === 0) {
+                                    compSummary = 'No components';
+                                  } else if (compNames.length <= 3) {
+                                    compSummary = compNames.join(', ');
+                                  } else {
+                                    compSummary = compNames.slice(0, 3).join(', ') + `, +${compNames.length - 3} more`;
+                                  }
+                                  return (
+                                    <label key={name + '-' + idx} className="flex items-center gap-2 cursor-pointer text-base">
+                                      <input
+                                        type="checkbox"
+                                        checked={pendingSystem.includes(name)}
+                                        onChange={e => {
+                                          if (e.target.checked) {
+                                            setPendingSystem([...pendingSystem, name]);
+                                          } else {
+                                            setPendingSystem(pendingSystem.filter((n: string) => n !== name));
+                                          }
+                                        }}
+                                      />
+                                      <span className="font-semibold">{name}</span>
+                                      <span className="text-xs text-gray-500 ml-2">{compSummary}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </PopoutPortal>
+                        </div>
+                      </div>
+                      {/* Assembly */}
+                      <div className="flex flex-col gap-1">
+                        <label className="font-semibold text-yellow-700">Assembly</label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-yellow-400 focus:border-yellow-400 text-xs bg-white"
+                            placeholder="Search..."
+                            value={assemblySearch}
+                            onChange={e => setAssemblySearch(e.target.value)}
+                            style={{ minWidth: 0 }}
+                          />
+                          <button
+                            ref={assemblyBtnRef}
+                            type="button"
+                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-yellow-400 focus:border-yellow-400 hover:border-yellow-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                            style={{ boxShadow: 'none', minWidth: 0 }}
+                            onClick={() => setShowAssemblyDropdown(v => !v)}
+                          >
+                            <span className="truncate">{selectedAssemblies.length === 0 ? 'All' : selectedAssemblies.join(', ')}</span>
+                            <span className="ml-1">▼</span>
+                          </button>
+                          <PopoutPortal anchorRef={assemblyBtnRef} show={showAssemblyDropdown}>
+                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                              <div className="flex justify-between mb-2">
+                                <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingAssemblies(allAssemblyNames as string[])}>Select All</button>
+                                <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingAssemblies([])}>Clear All</button>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                {(allAssemblyNames as string[]).filter(name => name.toLowerCase().includes(assemblySearch.toLowerCase())).map((name, idx) => (
+                                  <label key={name} className="flex items-center gap-2 cursor-pointer text-base">
+                                    <input
+                                      type="checkbox"
+                                      checked={pendingAssemblies.includes(name)}
+                                      onChange={e => {
+                                        if (e.target.checked) {
+                                          setPendingAssemblies([...pendingAssemblies, name]);
+                                        } else {
+                                          setPendingAssemblies(pendingAssemblies.filter(n => n !== name));
+                                        }
+                                      }}
+                                    />
+                                    <span>{name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          </PopoutPortal>
+                        </div>
+                      </div>
+                      {/* Subassembly */}
+                      <div className="flex flex-col gap-1">
+                        <label className="font-semibold text-orange-700">Subassembly</label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-orange-400 focus:border-orange-400 text-xs bg-white"
+                            placeholder="Search..."
+                            value={subassemblySearch}
+                            onChange={e => setSubassemblySearch(e.target.value)}
+                            style={{ minWidth: 0 }}
+                          />
+                          <button
+                            ref={subassemblyBtnRef}
+                            type="button"
+                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-orange-400 focus:border-orange-400 hover:border-orange-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                            style={{ boxShadow: 'none', minWidth: 0 }}
+                            onClick={() => setShowSubassemblyDropdown(v => !v)}
+                          >
+                            <span className="truncate">{selectedSubassemblies.length === 0 ? 'All' : selectedSubassemblies.join(', ')}</span>
+                            <span className="ml-1">▼</span>
+                          </button>
+                          <PopoutPortal anchorRef={subassemblyBtnRef} show={showSubassemblyDropdown}>
+                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                              <div className="flex justify-between mb-2">
+                                <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingSubassemblies(allSubassemblyNames as string[])}>Select All</button>
+                                <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingSubassemblies([])}>Clear All</button>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                {(allSubassemblyNames as string[]).filter(name => name.toLowerCase().includes(subassemblySearch.toLowerCase())).map((name, idx) => (
+                                  <label key={name} className="flex items-center gap-2 cursor-pointer text-base">
+                                    <input
+                                      type="checkbox"
+                                      checked={pendingSubassemblies.includes(name)}
+                                      onChange={e => {
+                                        if (e.target.checked) {
+                                          setPendingSubassemblies([...pendingSubassemblies, name]);
+                                        } else {
+                                          setPendingSubassemblies(pendingSubassemblies.filter(n => n !== name));
+                                        }
+                                      }}
+                                    />
+                                    <span>{name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          </PopoutPortal>
+                        </div>
+                      </div>
+                      {/* Component */}
+                      <div className="flex flex-col gap-1">
+                        <label className="font-semibold text-purple-700">Component</label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-purple-400 focus:border-purple-400 text-xs bg-white"
+                            placeholder="Search..."
+                            value={componentSearch}
+                            onChange={e => setComponentSearch(e.target.value)}
+                            style={{ minWidth: 0 }}
+                          />
+                          <button
+                            ref={componentBtnRef}
+                            type="button"
+                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-purple-400 focus:border-purple-400 hover:border-purple-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                            style={{ boxShadow: 'none', minWidth: 0 }}
+                            onClick={() => setShowComponentDropdown(v => !v)}
+                          >
+                            <span className="truncate">{selectedComponent.length === 0 ? 'All' : selectedComponent.join(', ')}</span>
+                            <span className="ml-1">▼</span>
+                          </button>
+                          <PopoutPortal anchorRef={componentBtnRef} show={showComponentDropdown}>
+                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                              <label className="flex items-center gap-2 cursor-pointer py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={pendingComponent.length === 0}
+                                  onChange={() => setPendingComponent([])}
+                                />
+                                <span>All</span>
+                              </label>
+                              {sortedComponentNames.filter(name => name.toLowerCase().includes(componentSearch.toLowerCase())).map((name: string, idx: number) => (
+                                <label key={name} className="flex items-center gap-2 cursor-pointer py-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={pendingComponent.includes(name)}
+                                    onChange={() => setPendingComponent(
+                                      pendingComponent.includes(name)
+                                        ? pendingComponent.filter((n: string) => n !== name)
+                                        : [...pendingComponent, name]
+                                    )}
+                                  />
+                                  <span>{name}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </PopoutPortal>
+                        </div>
+                      </div>
+                      {/* Confirm/Clear Buttons */}
+                      <div className="flex justify-end mt-2 gap-2">
+                        <button
+                          className="px-2 py-1 text-xs text-gray-500 hover:underline hover:text-red-600"
+                          title="Clear all selections"
+                          onClick={() => {
+                            setPendingSystem([]);
+                            setPendingAssemblies([]);
+                            setPendingSubassemblies([]);
+                            setPendingComponent([]);
+                            setSelectedSystem([]);
+                            setSelectedAssemblies([]);
+                            setSelectedSubassemblies([]);
+                            setSelectedComponent([]);
+                            setShowSystemDropdown(false);
+                            setShowAssemblyDropdown(false);
+                            setShowSubassemblyDropdown(false);
+                            setShowComponentDropdown(false);
+                            setIsolatedNodeId(null); // <-- Clear isolation as well
+                          }}
+                          style={{ minWidth: 0 }}
+                        >
+                          Clear All
+                        </button>
+                        <button
+                          className="px-3 py-1 bg-blue-600 text-white rounded shadow font-bold text-xs hover:bg-blue-700 transition-colors disabled:opacity-60"
+                          disabled={
+                            pendingSystem.length === selectedSystem.length &&
+                            JSON.stringify(pendingAssemblies) === JSON.stringify(selectedAssemblies) &&
+                            JSON.stringify(pendingSubassemblies) === JSON.stringify(selectedSubassemblies) &&
+                            JSON.stringify(pendingComponent) === JSON.stringify(selectedComponent)
+                          }
+                          onClick={() => {
+                            setSelectedSystem(pendingSystem);
+                            setSelectedAssemblies(pendingAssemblies);
+                            setSelectedSubassemblies(pendingSubassemblies);
+                            setSelectedComponent(pendingComponent);
+                            setShowSystemDropdown(false);
+                            setShowAssemblyDropdown(false);
+                            setShowSubassemblyDropdown(false);
+                            setShowComponentDropdown(false);
                           }}
                         >
-                          {(allAssemblyNames as string[]).map((name, idx) => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
-                        </select>
-                        <button
-                          className="text-xs text-yellow-600 underline self-end hover:text-yellow-800 disabled:text-gray-300"
-                          onClick={() => setSelectedAssemblies([])}
-                          disabled={selectedAssemblies.length === 0}
-                        >Clear</button>
-                      </div>
-                    </div>
-                    {/* Subassembly */}
-                    <div>
-                      <label className="font-bold text-orange-700 text-sm mb-1 block">Subassembly</label>
-                      <div className="flex items-center gap-2">
-                        <select
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 transition-all shadow-sm hover:border-orange-400"
-                          multiple
-                          size={Math.min(4, (allSubassemblyNames as string[]).length)}
-                          value={selectedSubassemblies}
-                          onChange={e => {
-                            const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
-                            setSelectedSubassemblies(options);
-                          }}
-                        >
-                          {(allSubassemblyNames as string[]).map((name, idx) => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
-                        </select>
-                        <button
-                          className="text-xs text-orange-600 underline self-end hover:text-orange-800 disabled:text-gray-300"
-                          onClick={() => setSelectedSubassemblies([])}
-                          disabled={selectedSubassemblies.length === 0}
-                        >Clear</button>
-                      </div>
-                    </div>
-                    {/* Component */}
-                    <div>
-                      <label className="font-bold text-purple-700 text-sm mb-1 block">Component</label>
-                      <div className="flex items-center gap-2">
-                        <select
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all shadow-sm hover:border-purple-400"
-                          value={selectedComponent || ''}
-                          onChange={e => setSelectedComponent(e.target.value || null)}
-                        >
-                          <option value="">All</option>
-                          {(allComponentNames as string[]).map((name, idx) => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
-                        </select>
-                        <button
-                          className="text-xs text-purple-600 underline self-end hover:text-purple-800 disabled:text-gray-300"
-                          onClick={() => setSelectedComponent(null)}
-                          disabled={!selectedComponent}
-                        >Clear</button>
+                          Confirm
+                        </button>
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
                 {/* Draggable Database Query Toolbox (right side) */}
-                <div
-                  ref={queryRef}
-                  className="absolute z-30 p-5 bg-gray-50 border border-gray-200 rounded-2xl shadow-xl overflow-auto cursor-grab"
-                  style={{ left: queryPos.x, top: queryPos.y, minWidth: 370, maxWidth: 520, maxHeight: modalHeight - 140, fontFamily: 'Inter, Roboto, Arial, sans-serif', boxShadow: '0 8px 32px 0 rgba(0,0,0,0.10)' }}
-                >
+                {showControls && (
                   <div
-                    className="w-full h-6 mb-2 cursor-grab rounded-t-xl bg-purple-100 flex items-center px-2 text-purple-700 font-bold text-xs select-none"
-                    onMouseDown={e => handleDragStart('query', e)}
+                    ref={queryRef}
+                    className="absolute z-30 p-3 bg-white border border-gray-300 overflow-auto cursor-grab"
+                    style={{ left: queryPos.x, top: queryPos.y, minWidth: 320, maxWidth: 480, maxHeight: modalHeight - 120, borderRadius: 0, boxShadow: 'none' }}
                   >
-                    Database Query Controls
-                  </div>
-                  {/* SQL Query Input */}
-                  <div className="mb-4">
-                    <label className="font-bold text-purple-700 text-sm mb-1 block">Run SQL Query (SELECT only)</label>
-                    <textarea
-                      className="w-full border rounded-lg px-3 py-2 text-base font-mono bg-white focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all shadow-sm mb-2"
-                      rows={3}
-                      value={sqlInput}
-                      onChange={e => setSqlInput(e.target.value)}
-                      placeholder="SELECT * FROM asset FETCH FIRST 10 ROWS ONLY;"
-                    />
-                    <button
-                      className="mt-1 px-5 py-2 bg-purple-600 text-white rounded shadow hover:bg-purple-700 transition-colors font-semibold text-base disabled:opacity-60"
-                      disabled={queryLoading || !sqlInput.trim()}
-                      onClick={handleRunQuery}
+                    <div
+                      className="w-full h-6 mb-2 cursor-grab border-b border-gray-200 flex items-center px-2 text-gray-700 font-bold text-xs select-none bg-white"
+                      onMouseDown={e => handleDragStart('query', e)}
+                      style={{ borderRadius: 0 }}
                     >
-                      {queryLoading ? 'Running...' : 'Run Query'}
-                    </button>
-                    {queryError && <div className="text-red-600 text-sm mt-2">{queryError}</div>}
-                  </div>
-                  {/* Query Results Placeholder */}
-                  {queryResults.length > 0 && (
-                    <div className="mt-4">
-                      <div className="font-bold text-gray-700 mb-2">Query Results (toggle visibility):</div>
-                      <ul className="max-h-40 overflow-auto border rounded bg-white p-2">
-                        {queryResults.map((row, idx) => (
-                          <li key={row.id || idx} className="flex items-center gap-2 py-1">
-                            <input
-                              type="checkbox"
-                              checked={queryVisibility[row.id || idx] ?? true}
-                              onChange={e => setQueryVisibility(v => ({ ...v, [row.id || idx]: e.target.checked }))}
-                            />
-                            <span className="font-mono text-xs text-gray-700 truncate">{JSON.stringify(row)}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      Database Query Controls
                     </div>
-                  )}
-                </div>
-                <CytoscapeComponent
-                  key={cyKey}
-                  elements={filteredCyElements}
-                  style={{ width: '100%', height: '100%' }}
-                  layout={{ name: 'breadthfirst', directed: true, padding: 100, spacingFactor: 2.5, animate: true, animationDuration: 600 }}
-                  stylesheet={[
-                    { selector: 'node', style: {
-                        'label': 'data(label)',
-                        'text-valign': 'center',
-                        'color': '#222',
-                        'background-color': '#e0e7ff',
-                        'border-width': 3,
-                        'border-color': '#2563eb',
-                        'font-size': 20,
-                        'width': 80,
-                        'height': 80,
-                        'text-wrap': 'wrap',
-                        'text-max-width': 70,
-                        'box-shadow': '0 4px 16px 0 rgba(0,0,0,0.10)',
-                        'z-index': 10,
-                        'transition-property': 'background-color, border-color, width, height',
-                        'transition-duration': '0.2s',
-                      }
-                    },
-                    { selector: 'node.system', style: {
-                        'background-color': '#2563eb',
-                        'border-color': '#1e40af',
-                        'shape': 'roundrectangle',
-                        'font-weight': 'bold',
-                        'width': 100,
-                        'height': 100,
-                        'font-size': 22,
-                      }
-                    },
-                    { selector: 'node.assembly', style: {
-                        'background-color': '#fbbf24',
-                        'border-color': '#b45309',
-                        'shape': 'diamond',
-                        'width': 90,
-                        'height': 90,
-                        'font-size': 18,
-                      }
-                    },
-                    { selector: 'node.component', style: {
-                        'background-color': '#a21caf',
-                        'border-color': '#581c87',
-                        'shape': 'ellipse',
-                        'width': 80,
-                        'height': 80,
-                        'font-size': 16,
-                      }
-                    },
-                    { selector: 'node:hover', style: {
-                        'background-color': '#f1f5f9',
-                        'border-color': '#6366f1',
-                        'width': 110,
-                        'height': 110,
-                        'font-size': 24,
-                        'z-index': 20,
-                        'box-shadow': '0 8px 32px 0 rgba(0,0,0,0.18)',
-                      }
-                    },
-                    { selector: 'edge', style: {
-                        'width': 4,
-                        'line-color': '#a3a3a3',
-                        'target-arrow-color': '#a3a3a3',
-                        'target-arrow-shape': 'triangle',
-                        'curve-style': 'bezier',
-                        'arrow-scale': 1.5,
-                      }
-                    },
-                    { selector: 'edge.highlighted-edge', style: {
-                        'line-color': '#2563eb',
-                        'target-arrow-color': '#2563eb',
-                        'width': 6,
-                        'z-index': 30,
-                      }
-                    },
-                  ]}
-                  cy={(cy: any) => {
-                    cy.on('mouseover', 'node', (evt: any) => {
-                      const node = evt.target;
-                      const pos = node.renderedPosition();
-                      setCyTooltip({
-                        x: pos.x,
-                        y: pos.y,
-                        content: Object.entries(node.data()).map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`).join(''),
-                      });
-                    });
-                    cy.on('mouseout', 'node', () => setCyTooltip(null));
-                  }}
-                />
-                {cyTooltip && (
-                  <div
-                    className="fixed z-50 p-2 bg-white border rounded shadow text-xs"
-                    style={{ left: cyTooltip.x + 20, top: cyTooltip.y + 80, pointerEvents: 'none' }}
-                    dangerouslySetInnerHTML={{ __html: cyTooltip.content }}
-                  />
+                    {/* SQL Query Input */}
+                    <div className="mb-4">
+                      <label className="font-bold text-gray-700 text-sm mb-1 block">Run SQL Query (SELECT only)</label>
+                      <textarea
+                        className="w-full border rounded px-3 py-2 text-base font-mono bg-white focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all mb-2"
+                        rows={3}
+                        value={sqlInput}
+                        onChange={e => setSqlInput(e.target.value)}
+                        placeholder="SELECT * FROM asset FETCH FIRST 10 ROWS ONLY;"
+                      />
+                      <button
+                        className="mt-1 px-5 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors font-semibold text-base disabled:opacity-60"
+                        disabled={queryLoading || !sqlInput.trim()}
+                        onClick={handleRunQuery}
+                      >
+                        {queryLoading ? 'Running...' : 'Run Query'}
+                      </button>
+                      {queryError && <div className="text-red-600 text-sm mt-2">{queryError}</div>}
+                    </div>
+                    {/* Query Results Placeholder */}
+                    {queryResults.length > 0 && (
+                      <div className="mt-4">
+                        <div className="font-bold text-gray-700 mb-2">Query Results (toggle visibility):</div>
+                        <ul className="max-h-40 overflow-auto border rounded bg-white p-2">
+                          {queryResults.map((row, idx) => (
+                            <li key={row.id || idx} className="flex items-center gap-2 py-1">
+                              <input
+                                type="checkbox"
+                                checked={queryVisibility[row.id || idx] ?? true}
+                                onChange={e => setQueryVisibility(v => ({ ...v, [row.id || idx]: e.target.checked }))}
+                              />
+                              <span className="font-mono text-xs text-gray-700 truncate">{JSON.stringify(row)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(selectedSystem.length === 0 && selectedAssemblies.length === 0 && selectedSubassemblies.length === 0 && selectedComponent.length === 0) ? (
+                  <div className="flex items-center justify-center w-full h-full text-lg text-gray-500 font-semibold">
+                    Please select a System, Assembly, Subassembly, or Component to view the graph.
+                  </div>
+                ) : (
+                  <>
+                    <CytoscapeComponent
+                      key={cyKey + (isolatedNodeId ? `-iso-${isolatedNodeId}` : '')}
+                      elements={filteredCyElements}
+                      style={{ width: '100%', height: '100%' }}
+                      layout={{ name: 'breadthfirst', directed: true, padding: 100, spacingFactor: 2.5, animate: true, animationDuration: 600 }}
+                      stylesheet={[
+                        { selector: 'node', style: {
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'color': '#134e1c',
+                            'background-color': '#bbf7d0',
+                            'border-width': 3,
+                            'border-color': '#22c55e',
+                            'font-size': 20,
+                            'width': 80,
+                            'height': 80,
+                            'text-wrap': 'wrap',
+                            'text-max-width': 70,
+                            'z-index': 10,
+                            'transition-property': 'background-color, border-color, width, height',
+                            'transition-duration': '0.2s',
+                          }
+                        },
+                        { selector: 'node.system', style: {
+                            'background-color': '#22c55e',
+                            'border-color': '#166534',
+                            'shape': 'roundrectangle',
+                            'font-weight': 'bold',
+                            'width': 100,
+                            'height': 100,
+                            'font-size': 22,
+                            'color': '#fff',
+                          }
+                        },
+                        { selector: 'node.assembly', style: {
+                            'background-color': '#4ade80',
+                            'border-color': '#166534',
+                            'shape': 'diamond',
+                            'width': 90,
+                            'height': 90,
+                            'font-size': 18,
+                            'color': '#134e1c',
+                          }
+                        },
+                        { selector: 'node.component', style: {
+                            'background-color': '#bbf7d0',
+                            'border-color': '#22c55e',
+                            'shape': 'ellipse',
+                            'width': 80,
+                            'height': 80,
+                            'font-size': 16,
+                            'color': '#134e1c',
+                          }
+                        },
+                        { selector: 'edge', style: {
+                            'width': 4,
+                            'line-color': '#22c55e',
+                            'target-arrow-color': '#22c55e',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'arrow-scale': 1.5,
+                          }
+                        },
+                        { selector: 'edge.highlighted-edge', style: {
+                            'line-color': '#166534',
+                            'target-arrow-color': '#166534',
+                            'width': 6,
+                            'z-index': 30,
+                          }
+                        },
+                      ]}
+                      cy={(cy: any) => {
+                        cy.on('mouseover', 'node', (evt: any) => {
+                          const node = evt.target;
+                          const pos = node.renderedPosition();
+                          setCyTooltip({
+                            x: pos.x,
+                            y: pos.y,
+                            content: Object.entries(node.data()).map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`).join(''),
+                          });
+                        });
+                        cy.on('mouseout', 'node', () => setCyTooltip(null));
+                        cy.on('tap', 'node', (evt: any) => {
+                          const node = evt.target;
+                          console.log('Cytoscape node tapped:', node.data()); // Debug log
+                          if (node.data().type === 'component') {
+                            setSelectedComponentNode(node.data());
+                          }
+                        });
+                        cy.on('cxttap', 'node', (evt: any) => {
+                          evt.preventDefault();
+                          const node = evt.target;
+                          const pos = evt.renderedPosition || node.renderedPosition();
+                          // Get mouse position relative to viewport
+                          const cyContainer = cy.container();
+                          const rect = cyContainer.getBoundingClientRect();
+                          setContextMenu({
+                            x: rect.left + pos.x,
+                            y: rect.top + pos.y,
+                            nodeId: node.id(),
+                            nodeData: node.data(),
+                            nodeType: node.data().type,
+                          });
+                        });
+                        cy.on('cxttap', (evt: any) => {
+                          // Right-click on background closes menu and clears isolation
+                          if (evt.target === cy) {
+                            setContextMenu(null);
+                            setIsolatedNodeId(null);
+                          }
+                        });
+                      }}
+                    />
+                    {cyTooltip && (
+                      <div
+                        className="fixed z-50 p-2 bg-white border rounded shadow text-xs"
+                        style={{ left: cyTooltip.x + 20, top: cyTooltip.y + 80, pointerEvents: 'none', minWidth: 260, maxWidth: 400 }}
+                        dangerouslySetInnerHTML={{ __html: cyTooltip.content }}
+                      />
+                    )}
+                    {contextMenu && (
+                      <div
+                        className="fixed z-50 bg-white border border-gray-300 rounded shadow-lg text-base min-w-[160px]"
+                        style={{ left: contextMenu.x, top: contextMenu.y, boxShadow: '0 4px 16px 0 rgba(0,0,0,0.10)' }}
+                        tabIndex={-1}
+                        onBlur={() => setContextMenu(null)}
+                      >
+                        <button
+                          className="w-full text-left px-4 py-2 hover:bg-green-100 text-green-800 font-semibold rounded-t"
+                          onClick={() => {
+                            setIsolatedNodeId(contextMenu.nodeId);
+                            setContextMenu(null);
+                          }}
+                        >
+                          Isolate Hierarchy
+                        </button>
+                        <button
+                          className="w-full text-left px-4 py-2 hover:bg-blue-100 text-blue-800 font-semibold"
+                          onClick={() => {
+                            if (contextMenu.nodeType === 'component') {
+                              setSelectedComponentNode(contextMenu.nodeData);
+                            } else {
+                              setSelectedNodeDetails(contextMenu.nodeData);
+                            }
+                            setContextMenu(null);
+                          }}
+                        >
+                          View Details
+                        </button>
+                        <button
+                          className="w-full text-left px-4 py-2 hover:bg-gray-100 text-gray-700 rounded-b"
+                          onClick={() => setContextMenu(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                    {isolatedNodeId && (
+                      <button
+                        className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-green-700 text-white rounded shadow hover:bg-green-800 transition"
+                        onClick={() => setIsolatedNodeId(null)}
+                        style={{ fontSize: 16 }}
+                      >
+                        Show Full Graph
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             ) : hierarchyType === 'system' ? (
@@ -1393,6 +1616,105 @@ export default function SpreadsheetPage() {
               <HierarchyTree hierarchy={hierarchy} />
             )}
           </div>
+          {/* Render a side modal when selectedComponentNode is set */}
+          {selectedComponentNode && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              right: 0,
+              height: '100vh',
+              width: 420,
+              background: 'white',
+              boxShadow: '-4px 0 24px 0 rgba(0,0,0,0.12)',
+              zIndex: 10010,
+              padding: 32,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              userSelect: 'text', // allow copy-paste
+            }}>
+              <button
+                onClick={() => setSelectedComponentNode(null)}
+                style={{ alignSelf: 'flex-end', fontSize: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#888', marginBottom: 16 }}
+                title="Close"
+              >
+                ×
+              </button>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#a21caf', marginBottom: 16 }}>
+                Component Details
+              </div>
+              {/* Path to root breadcrumb */}
+              <div style={{ fontSize: 14, color: '#888', marginBottom: 18, wordBreak: 'break-all' }}>
+                <span style={{ fontWeight: 600, color: '#444' }}>Path to Top:</span>
+                <br />
+                {getPathToRoot(selectedComponentNode.id || selectedComponentNode.ID || selectedComponentNode.Name)
+                  .map((n, idx, arr) => (
+                    <span key={n.id || n.data?.Name || idx}>
+                      {n.data?.Name || n.data?.label || n.label || n.id}
+                      {idx < arr.length - 1 && <span style={{ color: '#bbb', margin: '0 6px' }}>{'>'}</span>}
+                    </span>
+                  ))}
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>{selectedComponentNode.label}</div>
+              <div style={{ fontSize: 15, color: '#444' }}>
+                {Object.entries(selectedComponentNode).map(([k, v]) => (
+                  <div key={k} style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600, color: '#666', marginRight: 8 }}>{k}:</span>
+                    <span>{String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {selectedNodeDetails && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              right: 0,
+              height: '100vh',
+              width: 420,
+              background: 'white',
+              boxShadow: '-4px 0 24px 0 rgba(0,0,0,0.12)',
+              zIndex: 10010,
+              padding: 32,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              userSelect: 'text', // allow copy-paste
+            }}>
+              <button
+                onClick={() => setSelectedNodeDetails(null)}
+                style={{ alignSelf: 'flex-end', fontSize: 24, background: 'none', border: 'none', cursor: 'pointer', color: '#888', marginBottom: 16 }}
+                title="Close"
+              >
+                ×
+              </button>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#2563eb', marginBottom: 16 }}>
+                Node Details
+              </div>
+              {/* Path to root breadcrumb */}
+              <div style={{ fontSize: 14, color: '#888', marginBottom: 18, wordBreak: 'break-all' }}>
+                <span style={{ fontWeight: 600, color: '#444' }}>Path to Top:</span>
+                <br />
+                {getPathToRoot(selectedNodeDetails.id || selectedNodeDetails.ID || selectedNodeDetails.Name)
+                  .map((n, idx, arr) => (
+                    <span key={n.id || n.data?.Name || idx}>
+                      {n.data?.Name || n.data?.label || n.label || n.id}
+                      {idx < arr.length - 1 && <span style={{ color: '#bbb', margin: '0 6px' }}>{'>'}</span>}
+                    </span>
+                  ))}
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>{selectedNodeDetails.label || selectedNodeDetails.Name}</div>
+              <div style={{ fontSize: 15, color: '#444' }}>
+                {Object.entries(selectedNodeDetails).map(([k, v]) => (
+                  <div key={k} style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600, color: '#666', marginRight: 8 }}>{k}:</span>
+                    <span>{String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <style jsx global>{`
             @keyframes slide-in-bottom {
               from { transform: translateY(100%); opacity: 0; }
@@ -1401,6 +1723,8 @@ export default function SpreadsheetPage() {
             .animate-slide-in-bottom {
               animation: slide-in-bottom 0.3s cubic-bezier(0.4,0,0.2,1);
             }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .animate-spin { animation: spin 0.7s linear infinite; }
           `}</style>
         </div>
       )}
