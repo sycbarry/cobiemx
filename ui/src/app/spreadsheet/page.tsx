@@ -20,6 +20,48 @@ import PopoutPortal from "./PopoutPortal";
 // Define nodeTypes outside the component to avoid React Flow warning
 const nodeTypes = { default: GraphNode };
 
+// Helper to build a location graph from facility hierarchy
+function buildLocationGraph(hierarchy: any): { nodes: any[]; edges: any[] } {
+  if (!hierarchy || !hierarchy.facilities) return { nodes: [], edges: [] };
+  let nodes: any[] = [];
+  let edges: any[] = [];
+  hierarchy.facilities.forEach((fac: any, fidx: number) => {
+    const facId = `fac-${fac.Name || fidx}`;
+    nodes.push({ id: facId, data: { label: fac.Name, type: 'facility', ...fac }, type: 'facility' });
+    (fac.floors || []).forEach((floor: any, flidx: number) => {
+      const floorId = `floor-${floor.Name || flidx}`;
+      nodes.push({ id: floorId, data: { label: floor.Name, type: 'floor', ...floor }, type: 'floor' });
+      edges.push({ id: `e-${facId}-${floorId}`, source: facId, target: floorId });
+      (floor.spaces || []).forEach((space: any, sidx: number) => {
+        const spaceId = `space-${space.Name || sidx}`;
+        nodes.push({ id: spaceId, data: { label: space.Name, type: 'space', ...space }, type: 'space' });
+        edges.push({ id: `e-${floorId}-${spaceId}`, source: floorId, target: spaceId });
+        // If zones exist, add them as children of space
+        if (space.zones && space.zones.length > 0) {
+          space.zones.forEach((zone: any, zidx: number) => {
+            const zoneId = `zone-${zone.Name || zidx}`;
+            nodes.push({ id: zoneId, data: { label: zone.Name, type: 'zone', ...zone }, type: 'zone' });
+            edges.push({ id: `e-${spaceId}-${zoneId}`, source: spaceId, target: zoneId });
+            (zone.components || []).forEach((comp: any, cidx: number) => {
+              const compId = `comp-${comp.Name || cidx}`;
+              nodes.push({ id: compId, data: { label: comp.Name, type: 'component', ...comp }, type: 'component' });
+              edges.push({ id: `e-${zoneId}-${compId}`, source: zoneId, target: compId });
+            });
+          });
+        } else {
+          // No zones, add components directly under space
+          (space.components || []).forEach((comp: any, cidx: number) => {
+            const compId = `comp-${comp.Name || cidx}`;
+            nodes.push({ id: compId, data: { label: comp.Name, type: 'component', ...comp }, type: 'component' });
+            edges.push({ id: `e-${spaceId}-${compId}`, source: spaceId, target: compId });
+          });
+        }
+      });
+    });
+  });
+  return { nodes, edges };
+}
+
 export default function SpreadsheetPage() {
   const { file } = useFileUpload();
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -124,6 +166,88 @@ export default function SpreadsheetPage() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string | null; nodeData?: any; nodeType?: string } | null>(null);
   const [showControls, setShowControls] = useState(true);
   const [selectedNodeDetails, setSelectedNodeDetails] = useState<any>(null);
+  // Add state for graph mode (system/location)
+  const [graphMode, setGraphMode] = useState<'system' | 'location'>('system');
+  // Add state for location graph filtering
+  const [selectedFacility, setSelectedFacility] = useState<string[]>([]);
+  const [selectedFloor, setSelectedFloor] = useState<string[]>([]);
+  const [selectedSpace, setSelectedSpace] = useState<string[]>([]);
+  const [selectedZone, setSelectedZone] = useState<string[]>([]);
+  // Pending state for popouts
+  const [pendingFacility, setPendingFacility] = useState<string[]>([]);
+  const [pendingFloor, setPendingFloor] = useState<string[]>([]);
+  const [pendingSpace, setPendingSpace] = useState<string[]>([]);
+  const [pendingZone, setPendingZone] = useState<string[]>([]);
+  // Popout open state
+  const [showFacilityDropdown, setShowFacilityDropdown] = useState(false);
+  const [showFloorDropdown, setShowFloorDropdown] = useState(false);
+  const [showSpaceDropdown, setShowSpaceDropdown] = useState(false);
+  const [showZoneDropdown, setShowZoneDropdown] = useState(false);
+  // Refs for popouts
+  const facilityBtnRef = useRef<HTMLButtonElement | null>(null);
+  const floorBtnRef = useRef<HTMLButtonElement | null>(null);
+  const spaceBtnRef = useRef<HTMLButtonElement | null>(null);
+  const zoneBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Sync pending state with actual state when popouts open/close
+  useEffect(() => { setPendingFacility(selectedFacility); }, [showFacilityDropdown]);
+  useEffect(() => { setPendingFloor(selectedFloor); }, [showFloorDropdown]);
+  useEffect(() => { setPendingSpace(selectedSpace); }, [showSpaceDropdown]);
+  useEffect(() => { setPendingZone(selectedZone); }, [showZoneDropdown]);
+
+  // Extract unique names for dropdowns from loaded COBie data
+  const facilityNames = useMemo(() => {
+    const sheet = allSheets[facilityTab];
+    if (!sheet || sheet.length < 2) return [];
+    const header = sheet[0];
+    const nameIdx = header.indexOf("Name");
+    return sheet.slice(1).map((row: any) => row[nameIdx]).filter(Boolean);
+  }, [allSheets, facilityTab]);
+  const floorNames = useMemo(() => {
+    const sheet = allSheets[floorTab];
+    if (!sheet || sheet.length < 2) return [];
+    const header = sheet[0];
+    const nameIdx = header.indexOf("Name");
+    return sheet.slice(1).map((row: any) => row[nameIdx]).filter(Boolean);
+  }, [allSheets, floorTab]);
+  const spaceNames = useMemo(() => {
+    const sheet = allSheets[spaceTab];
+    if (!sheet || sheet.length < 2) return [];
+    const header = sheet[0];
+    const nameIdx = header.indexOf("Name");
+    return sheet.slice(1).map((row: any) => row[nameIdx]).filter(Boolean);
+  }, [allSheets, spaceTab]);
+  const zoneNames = useMemo(() => {
+    const sheet = allSheets["Zone"];
+    if (!sheet || sheet.length < 2) return [];
+    const header = sheet[0];
+    const nameIdx = header.indexOf("Name");
+    return sheet.slice(1).map((row: any) => row[nameIdx]).filter(Boolean);
+  }, [allSheets]);
+
+  // Helper to filter the location hierarchy by selected values
+  function filterLocationHierarchy(hierarchy: any): any {
+    if (!hierarchy || !hierarchy.facilities) return hierarchy;
+    let facilities = hierarchy.facilities;
+    if (selectedFacility.length > 0) {
+      facilities = facilities.filter((f: any) => selectedFacility.includes(f.Name));
+    }
+    facilities = facilities.map((f: any) => {
+      let floors = f.floors || [];
+      if (selectedFloor.length > 0) floors = floors.filter((fl: any) => selectedFloor.includes(fl.Name));
+      floors = floors.map((fl: any) => {
+        let spaces = fl.spaces || [];
+        if (selectedSpace.length > 0) spaces = spaces.filter((sp: any) => selectedSpace.includes(sp.Name));
+        spaces = spaces.map((sp: any) => {
+          let zones = sp.zones || [];
+          if (selectedZone.length > 0) zones = zones.filter((z: any) => selectedZone.includes(z.Name));
+          return { ...sp, zones };
+        });
+        return { ...fl, spaces };
+      });
+      return { ...f, floors };
+    });
+    return { ...hierarchy, facilities };
+  }
 
   // Update modal width on window resize
   useEffect(() => {
@@ -234,7 +358,8 @@ export default function SpreadsheetPage() {
           [assemblyTab]: allSheets[assemblyTab],
         });
       } else {
-        hierarchyResult = buildCobieGraphHierarchy({
+        // Always build both hierarchies for graph mode
+        const systemGraph = buildCobieGraphHierarchy({
           [systemTab]: allSheets[systemTab],
           [componentTab]: allSheets[componentTab],
           [assemblyTab]: allSheets[assemblyTab],
@@ -244,6 +369,14 @@ export default function SpreadsheetPage() {
           Component: allSheets[componentTab],
           Assembly: allSheets[assemblyTab],
         });
+        const locationHierarchy = buildCobieHierarchy({
+          [facilityTab]: allSheets[facilityTab],
+          [floorTab]: allSheets[floorTab],
+          [spaceTab]: allSheets[spaceTab],
+          Component: allSheets[componentTab],
+        });
+        const locationGraph = buildLocationGraph(locationHierarchy);
+        hierarchyResult = graphMode === 'system' ? systemGraph : locationGraph;
       }
       setHierarchy(hierarchyResult);
       setShowHierarchy(true);
@@ -626,6 +759,21 @@ export default function SpreadsheetPage() {
     }
     return path;
   }
+
+  // Only update the location graph when Confirm is clicked
+  const updateLocationGraph = useCallback(() => {
+    if (hierarchyType === 'graph' && graphMode === 'location') {
+      const locationHierarchy = buildCobieHierarchy({
+        [facilityTab]: allSheets[facilityTab],
+        [floorTab]: allSheets[floorTab],
+        [spaceTab]: allSheets[spaceTab],
+        Component: allSheets[componentTab],
+      });
+      const filteredHierarchy = filterLocationHierarchy(locationHierarchy);
+      const locationGraph = buildLocationGraph(filteredHierarchy);
+      setHierarchy(locationGraph);
+    }
+  }, [hierarchyType, graphMode, facilityTab, floorTab, spaceTab, componentTab, allSheets, selectedFacility, selectedFloor, selectedSpace, selectedZone]);
 
   if (file && !workbook) {
     return (
@@ -1106,6 +1254,22 @@ export default function SpreadsheetPage() {
             </div>
             {hierarchyType === 'graph' ? (
               <div style={{ width: '100%', height: modalHeight - 90, position: 'relative' }}>
+                {/* Graph mode toggle */}
+                <div className="flex items-center gap-4 mb-2 px-2">
+                  <label className="font-semibold text-base text-gray-700">Graph Mode:</label>
+                  <button
+                    className={`px-3 py-1 rounded-l border border-gray-300 font-semibold text-sm ${graphMode === 'system' ? 'bg-green-600 text-white' : 'bg-white text-green-700 hover:bg-green-100'}`}
+                    onClick={() => setGraphMode('system')}
+                  >
+                    System
+                  </button>
+                  <button
+                    className={`px-3 py-1 rounded-r border border-gray-300 font-semibold text-sm ${graphMode === 'location' ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 hover:bg-blue-100'}`}
+                    onClick={() => setGraphMode('location')}
+                  >
+                    Location
+                  </button>
+                </div>
                 {/* Draggable COBie Hierarchy Toolbox */}
                 {showControls && (
                   <div
@@ -1119,219 +1283,452 @@ export default function SpreadsheetPage() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-2 text-base" style={{ minWidth: 320, maxWidth: 400, padding: 12 }}>
-                      {/* System */}
-                      <div className="flex flex-col gap-1">
-                        <label className="font-semibold text-blue-700">System</label>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
-                            placeholder="Search..."
-                            value={systemSearch}
-                            onChange={e => setSystemSearch(e.target.value)}
-                            style={{ minWidth: 0 }}
-                          />
-                          <button
-                            ref={systemBtnRef}
-                            type="button"
-                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 hover:border-blue-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
-                            style={{ boxShadow: 'none', minWidth: 0 }}
-                            onClick={() => setShowSystemDropdown(v => !v)}
-                          >
-                            <span className="truncate">{selectedSystem.length === 0 ? 'All' : selectedSystem.join(', ')}</span>
-                            <span className="ml-1">▼</span>
-                          </button>
-                          <PopoutPortal anchorRef={systemBtnRef} show={showSystemDropdown}>
-                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
-                              <div className="flex justify-between mb-2">
-                                <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingSystem(allSystemNames as string[])}>Select All</button>
-                                <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingSystem([])}>Clear All</button>
+                      {/* Graph mode toggle */}
+                      <div className="flex items-center gap-4 mb-2">
+                        <label className="font-semibold text-base text-gray-700">Graph Mode:</label>
+                        <button
+                          className={`px-3 py-1 rounded-l border border-gray-300 font-semibold text-sm ${graphMode === 'system' ? 'bg-green-600 text-white' : 'bg-white text-green-700 hover:bg-green-100'}`}
+                          onClick={() => setGraphMode('system')}
+                        >
+                          System
+                        </button>
+                        <button
+                          className={`px-3 py-1 rounded-r border border-gray-300 font-semibold text-sm ${graphMode === 'location' ? 'bg-blue-600 text-white' : 'bg-white text-blue-700 hover:bg-blue-100'}`}
+                          onClick={() => setGraphMode('location')}
+                        >
+                          Location
+                        </button>
+                      </div>
+                      {/* Facility/floor/space selectors for location mode */}
+                      {graphMode === 'location' && (
+                        <>
+                          <div className="flex flex-col gap-2">
+                            {/* Facility row */}
+                            <div className="flex flex-col gap-1">
+                              <label className="font-semibold text-blue-700 text-base">Facility</label>
+                              <div className="flex flex-row gap-2 items-center">
+                                <input
+                                  type="text"
+                                  className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 min-w-[90px]"
+                                  placeholder="Search..."
+                                  // value={facilitySearch}
+                                  // onChange={e => setFacilitySearch(e.target.value)}
+                                  style={{ minWidth: 0 }}
+                                  disabled
+                                />
+                                <button ref={facilityBtnRef} type="button" className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 hover:border-blue-400 text-xs flex-1 text-left flex justify-between items-center min-w-0" onClick={() => setShowFacilityDropdown(v => !v)}>
+                                  <span className="truncate">{selectedFacility.length === 0 ? 'All' : selectedFacility.join(', ')}</span>
+                                  <span className="ml-1">▼</span>
+                                </button>
+                                <PopoutPortal anchorRef={facilityBtnRef} show={showFacilityDropdown}>
+                                  <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                    <div className="flex justify-between mb-2">
+                                      <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingFacility(facilityNames as string[])}>Select All</button>
+                                      <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingFacility([])}>Clear All</button>
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      {facilityNames.map((name: string) => (
+                                        <label key={name} className="flex items-center gap-2 cursor-pointer text-base py-1">
+                                          <input type="checkbox" checked={pendingFacility.includes(name)} onChange={e => {
+                                            if (e.target.checked) setPendingFacility([...pendingFacility, name]);
+                                            else setPendingFacility(pendingFacility.filter(n => n !== name));
+                                          }} />
+                                          <span>{name}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </PopoutPortal>
                               </div>
+                            </div>
+                            {/* Floor row */}
+                            <div className="flex flex-col gap-1">
+                              <label className="font-semibold text-blue-700 text-base">Floor</label>
+                              <div className="flex flex-row gap-2 items-center">
+                                <input
+                                  type="text"
+                                  className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 min-w-[90px]"
+                                  placeholder="Search..."
+                                  // value={floorSearch}
+                                  // onChange={e => setFloorSearch(e.target.value)}
+                                  style={{ minWidth: 0 }}
+                                  disabled
+                                />
+                                <button ref={floorBtnRef} type="button" className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 hover:border-blue-400 text-xs flex-1 text-left flex justify-between items-center min-w-0" style={{ boxShadow: 'none', minWidth: 0 }} onClick={() => setShowFloorDropdown(v => !v)}>
+                                  <span className="truncate">{selectedFloor.length === 0 ? 'All' : selectedFloor.join(', ')}</span>
+                                  <span className="ml-1">▼</span>
+                                </button>
+                                <PopoutPortal anchorRef={floorBtnRef} show={showFloorDropdown}>
+                                  <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                    <div className="flex justify-between mb-2">
+                                      <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingFloor(floorNames as string[])}>Select All</button>
+                                      <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingFloor([])}>Clear All</button>
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      {floorNames.map((name: string) => (
+                                        <label key={name} className="flex items-center gap-2 cursor-pointer text-base py-1">
+                                          <input type="checkbox" checked={pendingFloor.includes(name)} onChange={e => {
+                                            if (e.target.checked) setPendingFloor([...pendingFloor, name]);
+                                            else setPendingFloor(pendingFloor.filter(n => n !== name));
+                                          }} />
+                                          <span>{name}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </PopoutPortal>
+                              </div>
+                            </div>
+                            {/* Space row */}
+                            <div className="flex flex-col gap-1">
+                              <label className="font-semibold text-blue-700 text-base">Space</label>
+                              <div className="flex flex-row gap-2 items-center">
+                                <input
+                                  type="text"
+                                  className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 min-w-[90px]"
+                                  placeholder="Search..."
+                                  // value={spaceSearch}
+                                  // onChange={e => setSpaceSearch(e.target.value)}
+                                  style={{ minWidth: 0 }}
+                                  disabled
+                                />
+                                <button ref={spaceBtnRef} type="button" className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 hover:border-blue-400 text-xs flex-1 text-left flex justify-between items-center min-w-0" style={{ boxShadow: 'none', minWidth: 0 }} onClick={() => setShowSpaceDropdown(v => !v)}>
+                                  <span className="truncate">{selectedSpace.length === 0 ? 'All' : selectedSpace.join(', ')}</span>
+                                  <span className="ml-1">▼</span>
+                                </button>
+                                <PopoutPortal anchorRef={spaceBtnRef} show={showSpaceDropdown}>
+                                  <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                    <div className="flex justify-between mb-2">
+                                      <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingSpace(spaceNames as string[])}>Select All</button>
+                                      <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingSpace([])}>Clear All</button>
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      {spaceNames.map((name: string) => (
+                                        <label key={name} className="flex items-center gap-2 cursor-pointer text-base py-1">
+                                          <input type="checkbox" checked={pendingSpace.includes(name)} onChange={e => {
+                                            if (e.target.checked) setPendingSpace([...pendingSpace, name]);
+                                            else setPendingSpace(pendingSpace.filter(n => n !== name));
+                                          }} />
+                                          <span>{name}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </PopoutPortal>
+                              </div>
+                            </div>
+                            {/* Zone row (optional) */}
+                            {zoneNames.length > 0 && (
                               <div className="flex flex-col gap-1">
-                                {hierarchy && 'nodes' in hierarchy && Array.isArray(hierarchy.nodes) && (hierarchy.nodes as any[]).filter((n: any) => n.type === 'system').filter((n: any) => n.data.Name && n.data.Name.toLowerCase().includes(systemSearch.toLowerCase())).map((n: any, idx: number) => {
-                                  const name = n.data.Name;
-                                  const compNames = (n.data.ComponentNames || '').split(';').map((s: string) => s.trim()).filter(Boolean);
-                                  let compSummary = '';
-                                  if (compNames.length === 0) {
-                                    compSummary = 'No components';
-                                  } else if (compNames.length <= 3) {
-                                    compSummary = compNames.join(', ');
-                                  } else {
-                                    compSummary = compNames.slice(0, 3).join(', ') + `, +${compNames.length - 3} more`;
-                                  }
-                                  return (
-                                    <label key={name + '-' + idx} className="flex items-center gap-2 cursor-pointer text-base">
+                                <label className="font-semibold text-blue-700 text-base">Zone</label>
+                                <div className="flex flex-row gap-2 items-center">
+                                  <input
+                                    type="text"
+                                    className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 min-w-[90px]"
+                                    placeholder="Search..."
+                                    // value={zoneSearch}
+                                    // onChange={e => setZoneSearch(e.target.value)}
+                                    style={{ minWidth: 0 }}
+                                    disabled
+                                  />
+                                  <button ref={zoneBtnRef} type="button" className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 hover:border-blue-400 text-xs flex-1 text-left flex justify-between items-center min-w-0" style={{ boxShadow: 'none', minWidth: 0 }} onClick={() => setShowZoneDropdown(v => !v)}>
+                                    <span className="truncate">{selectedZone.length === 0 ? 'All' : selectedZone.join(', ')}</span>
+                                    <span className="ml-1">▼</span>
+                                  </button>
+                                  <PopoutPortal anchorRef={zoneBtnRef} show={showZoneDropdown}>
+                                    <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                      <div className="flex justify-between mb-2">
+                                        <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingZone(zoneNames as string[])}>Select All</button>
+                                        <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingZone([])}>Clear All</button>
+                                      </div>
+                                      <div className="flex flex-col gap-1">
+                                        {zoneNames.map((name: string) => (
+                                          <label key={name} className="flex items-center gap-2 cursor-pointer text-base py-1">
+                                            <input type="checkbox" checked={pendingZone.includes(name)} onChange={e => {
+                                              if (e.target.checked) setPendingZone([...pendingZone, name]);
+                                              else setPendingZone(pendingZone.filter(n => n !== name));
+                                            }} />
+                                            <span>{name}</span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </PopoutPortal>
+                                </div>
+                              </div>
+                            )}
+                            {/* Confirm/Clear All buttons at the bottom */}
+                            <div className="flex gap-2 mt-4 justify-end">
+                              <button
+                                className="px-2 py-1 text-xs text-gray-500 hover:underline hover:text-red-600"
+                                title="Clear all selections"
+                                onClick={() => {
+                                  setPendingFacility([]);
+                                  setPendingFloor([]);
+                                  setPendingSpace([]);
+                                  setPendingZone([]);
+                                  setSelectedFacility([]);
+                                  setSelectedFloor([]);
+                                  setSelectedSpace([]);
+                                  setSelectedZone([]);
+                                  updateLocationGraph();
+                                  setShowFacilityDropdown(false);
+                                  setShowFloorDropdown(false);
+                                  setShowSpaceDropdown(false);
+                                  setShowZoneDropdown(false);
+                                }}
+                                style={{ minWidth: 0 }}
+                              >
+                                Clear All
+                              </button>
+                              <button
+                                className="px-3 py-1 bg-blue-600 text-white rounded shadow font-bold text-xs hover:bg-blue-700 transition-colors disabled:opacity-60"
+                                disabled={
+                                  pendingFacility.length === selectedFacility.length &&
+                                  pendingFloor.length === selectedFloor.length &&
+                                  pendingSpace.length === selectedSpace.length &&
+                                  pendingZone.length === selectedZone.length &&
+                                  JSON.stringify(pendingFacility) === JSON.stringify(selectedFacility) &&
+                                  JSON.stringify(pendingFloor) === JSON.stringify(selectedFloor) &&
+                                  JSON.stringify(pendingSpace) === JSON.stringify(selectedSpace) &&
+                                  JSON.stringify(pendingZone) === JSON.stringify(selectedZone)
+                                }
+                                onClick={() => {
+                                  setSelectedFacility(pendingFacility);
+                                  setSelectedFloor(pendingFloor);
+                                  setSelectedSpace(pendingSpace);
+                                  setSelectedZone(pendingZone);
+                                  setShowFacilityDropdown(false);
+                                  setShowFloorDropdown(false);
+                                  setShowSpaceDropdown(false);
+                                  setShowZoneDropdown(false);
+                                  setTimeout(updateLocationGraph, 0);
+                                }}
+                              >
+                                Confirm
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      {/* System/Assembly/Component controls for system mode only */}
+                      {graphMode === 'system' && (
+                        <>
+                          {/* System */}
+                          <div className="flex flex-col gap-1">
+                            <label className="font-semibold text-blue-700">System</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-blue-400 focus:border-blue-400 text-xs bg-white"
+                                placeholder="Search..."
+                                value={systemSearch}
+                                onChange={e => setSystemSearch(e.target.value)}
+                                style={{ minWidth: 0 }}
+                              />
+                              <button
+                                ref={systemBtnRef}
+                                type="button"
+                                className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:border-blue-400 hover:border-blue-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                                style={{ boxShadow: 'none', minWidth: 0 }}
+                                onClick={() => setShowSystemDropdown(v => !v)}
+                              >
+                                <span className="truncate">{selectedSystem.length === 0 ? 'All' : selectedSystem.join(', ')}</span>
+                                <span className="ml-1">▼</span>
+                              </button>
+                              <PopoutPortal anchorRef={systemBtnRef} show={showSystemDropdown}>
+                                <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                  <div className="flex justify-between mb-2">
+                                    <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingSystem(allSystemNames as string[])}>Select All</button>
+                                    <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingSystem([])}>Clear All</button>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    {hierarchy && 'nodes' in hierarchy && Array.isArray(hierarchy.nodes) && (hierarchy.nodes as any[]).filter((n: any) => n.type === 'system').filter((n: any) => n.data.Name && n.data.Name.toLowerCase().includes(systemSearch.toLowerCase())).map((n: any, idx: number) => {
+                                      const name = n.data.Name;
+                                      const compNames = (n.data.ComponentNames || '').split(';').map((s: string) => s.trim()).filter(Boolean);
+                                      let compSummary = '';
+                                      if (compNames.length === 0) {
+                                        compSummary = 'No components';
+                                      } else if (compNames.length <= 3) {
+                                        compSummary = compNames.join(', ');
+                                      } else {
+                                        compSummary = compNames.slice(0, 3).join(', ') + `, +${compNames.length - 3} more`;
+                                      }
+                                      return (
+                                        <label key={name + '-' + idx} className="flex items-center gap-2 cursor-pointer text-base">
+                                          <input
+                                            type="checkbox"
+                                            checked={pendingSystem.includes(name)}
+                                            onChange={e => {
+                                              if (e.target.checked) {
+                                                setPendingSystem([...pendingSystem, name]);
+                                              } else {
+                                                setPendingSystem(pendingSystem.filter((n: string) => n !== name));
+                                              }
+                                            }}
+                                          />
+                                          <span className="font-semibold">{name}</span>
+                                          <span className="text-xs text-gray-500 ml-2">{compSummary}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </PopoutPortal>
+                            </div>
+                          </div>
+                          {/* Assembly */}
+                          <div className="flex flex-col gap-1">
+                            <label className="font-semibold text-yellow-700">Assembly</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-yellow-400 focus:border-yellow-400 text-xs bg-white"
+                                placeholder="Search..."
+                                value={assemblySearch}
+                                onChange={e => setAssemblySearch(e.target.value)}
+                                style={{ minWidth: 0 }}
+                              />
+                              <button
+                                ref={assemblyBtnRef}
+                                type="button"
+                                className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-yellow-400 focus:border-yellow-400 hover:border-yellow-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                                style={{ boxShadow: 'none', minWidth: 0 }}
+                                onClick={() => setShowAssemblyDropdown(v => !v)}
+                              >
+                                <span className="truncate">{selectedAssemblies.length === 0 ? 'All' : selectedAssemblies.join(', ')}</span>
+                                <span className="ml-1">▼</span>
+                              </button>
+                              <PopoutPortal anchorRef={assemblyBtnRef} show={showAssemblyDropdown}>
+                                <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                  <div className="flex justify-between mb-2">
+                                    <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingAssemblies(allAssemblyNames as string[])}>Select All</button>
+                                    <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingAssemblies([])}>Clear All</button>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    {(allAssemblyNames as string[]).filter((name: string) => name.toLowerCase().includes(assemblySearch.toLowerCase())).map((name, idx) => (
+                                      <label key={name} className="flex items-center gap-2 cursor-pointer text-base">
+                                        <input
+                                          type="checkbox"
+                                          checked={pendingAssemblies.includes(name)}
+                                          onChange={e => {
+                                            if (e.target.checked) {
+                                              setPendingAssemblies([...pendingAssemblies, name]);
+                                            } else {
+                                              setPendingAssemblies(pendingAssemblies.filter(n => n !== name));
+                                            }
+                                          }}
+                                        />
+                                        <span>{name}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              </PopoutPortal>
+                            </div>
+                          </div>
+                          {/* Subassembly */}
+                          <div className="flex flex-col gap-1">
+                            <label className="font-semibold text-orange-700">Subassembly</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-orange-400 focus:border-orange-400 text-xs bg-white"
+                                placeholder="Search..."
+                                value={subassemblySearch}
+                                onChange={e => setSubassemblySearch(e.target.value)}
+                                style={{ minWidth: 0 }}
+                              />
+                              <button
+                                ref={subassemblyBtnRef}
+                                type="button"
+                                className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-orange-400 focus:border-orange-400 hover:border-orange-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                                style={{ boxShadow: 'none', minWidth: 0 }}
+                                onClick={() => setShowSubassemblyDropdown(v => !v)}
+                              >
+                                <span className="truncate">{selectedSubassemblies.length === 0 ? 'All' : selectedSubassemblies.join(', ')}</span>
+                                <span className="ml-1">▼</span>
+                              </button>
+                              <PopoutPortal anchorRef={subassemblyBtnRef} show={showSubassemblyDropdown}>
+                                <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                  <div className="flex justify-between mb-2">
+                                    <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingSubassemblies(allSubassemblyNames as string[])}>Select All</button>
+                                    <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingSubassemblies([])}>Clear All</button>
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    {(allSubassemblyNames as string[]).filter((name: string) => name.toLowerCase().includes(subassemblySearch.toLowerCase())).map((name, idx) => (
+                                      <label key={name} className="flex items-center gap-2 cursor-pointer text-base">
+                                        <input
+                                          type="checkbox"
+                                          checked={pendingSubassemblies.includes(name)}
+                                          onChange={e => {
+                                            if (e.target.checked) {
+                                              setPendingSubassemblies([...pendingSubassemblies, name]);
+                                            } else {
+                                              setPendingSubassemblies(pendingSubassemblies.filter(n => n !== name));
+                                            }
+                                          }}
+                                        />
+                                        <span>{name}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              </PopoutPortal>
+                            </div>
+                          </div>
+                          {/* Component */}
+                          <div className="flex flex-col gap-1">
+                            <label className="font-semibold text-purple-700">Component</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-purple-400 focus:border-purple-400 text-xs bg-white"
+                                placeholder="Search..."
+                                value={componentSearch}
+                                onChange={e => setComponentSearch(e.target.value)}
+                                style={{ minWidth: 0 }}
+                              />
+                              <button
+                                ref={componentBtnRef}
+                                type="button"
+                                className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-purple-400 focus:border-purple-400 hover:border-purple-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
+                                style={{ boxShadow: 'none', minWidth: 0 }}
+                                onClick={() => setShowComponentDropdown(v => !v)}
+                              >
+                                <span className="truncate">{selectedComponent.length === 0 ? 'All' : selectedComponent.join(', ')}</span>
+                                <span className="ml-1">▼</span>
+                              </button>
+                              <PopoutPortal anchorRef={componentBtnRef} show={showComponentDropdown}>
+                                <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
+                                  <label className="flex items-center gap-2 cursor-pointer py-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={pendingComponent.length === 0}
+                                      onChange={() => setPendingComponent([])}
+                                    />
+                                    <span>All</span>
+                                  </label>
+                                  {sortedComponentNames.filter(name => name.toLowerCase().includes(componentSearch.toLowerCase())).map((name: string, idx: number) => (
+                                    <label key={name} className="flex items-center gap-2 cursor-pointer py-1">
                                       <input
                                         type="checkbox"
-                                        checked={pendingSystem.includes(name)}
-                                        onChange={e => {
-                                          if (e.target.checked) {
-                                            setPendingSystem([...pendingSystem, name]);
-                                          } else {
-                                            setPendingSystem(pendingSystem.filter((n: string) => n !== name));
-                                          }
-                                        }}
+                                        checked={pendingComponent.includes(name)}
+                                        onChange={() => setPendingComponent(
+                                          pendingComponent.includes(name)
+                                            ? pendingComponent.filter((n: string) => n !== name)
+                                            : [...pendingComponent, name]
+                                        )}
                                       />
-                                      <span className="font-semibold">{name}</span>
-                                      <span className="text-xs text-gray-500 ml-2">{compSummary}</span>
+                                      <span>{name}</span>
                                     </label>
-                                  );
-                                })}
-                              </div>
+                                  ))}
+                                </div>
+                              </PopoutPortal>
                             </div>
-                          </PopoutPortal>
-                        </div>
-                      </div>
-                      {/* Assembly */}
-                      <div className="flex flex-col gap-1">
-                        <label className="font-semibold text-yellow-700">Assembly</label>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-yellow-400 focus:border-yellow-400 text-xs bg-white"
-                            placeholder="Search..."
-                            value={assemblySearch}
-                            onChange={e => setAssemblySearch(e.target.value)}
-                            style={{ minWidth: 0 }}
-                          />
-                          <button
-                            ref={assemblyBtnRef}
-                            type="button"
-                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-yellow-400 focus:border-yellow-400 hover:border-yellow-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
-                            style={{ boxShadow: 'none', minWidth: 0 }}
-                            onClick={() => setShowAssemblyDropdown(v => !v)}
-                          >
-                            <span className="truncate">{selectedAssemblies.length === 0 ? 'All' : selectedAssemblies.join(', ')}</span>
-                            <span className="ml-1">▼</span>
-                          </button>
-                          <PopoutPortal anchorRef={assemblyBtnRef} show={showAssemblyDropdown}>
-                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
-                              <div className="flex justify-between mb-2">
-                                <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingAssemblies(allAssemblyNames as string[])}>Select All</button>
-                                <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingAssemblies([])}>Clear All</button>
-                              </div>
-                              <div className="flex flex-col gap-1">
-                                {(allAssemblyNames as string[]).filter(name => name.toLowerCase().includes(assemblySearch.toLowerCase())).map((name, idx) => (
-                                  <label key={name} className="flex items-center gap-2 cursor-pointer text-base">
-                                    <input
-                                      type="checkbox"
-                                      checked={pendingAssemblies.includes(name)}
-                                      onChange={e => {
-                                        if (e.target.checked) {
-                                          setPendingAssemblies([...pendingAssemblies, name]);
-                                        } else {
-                                          setPendingAssemblies(pendingAssemblies.filter(n => n !== name));
-                                        }
-                                      }}
-                                    />
-                                    <span>{name}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          </PopoutPortal>
-                        </div>
-                      </div>
-                      {/* Subassembly */}
-                      <div className="flex flex-col gap-1">
-                        <label className="font-semibold text-orange-700">Subassembly</label>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-orange-400 focus:border-orange-400 text-xs bg-white"
-                            placeholder="Search..."
-                            value={subassemblySearch}
-                            onChange={e => setSubassemblySearch(e.target.value)}
-                            style={{ minWidth: 0 }}
-                          />
-                          <button
-                            ref={subassemblyBtnRef}
-                            type="button"
-                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-orange-400 focus:border-orange-400 hover:border-orange-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
-                            style={{ boxShadow: 'none', minWidth: 0 }}
-                            onClick={() => setShowSubassemblyDropdown(v => !v)}
-                          >
-                            <span className="truncate">{selectedSubassemblies.length === 0 ? 'All' : selectedSubassemblies.join(', ')}</span>
-                            <span className="ml-1">▼</span>
-                          </button>
-                          <PopoutPortal anchorRef={subassemblyBtnRef} show={showSubassemblyDropdown}>
-                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
-                              <div className="flex justify-between mb-2">
-                                <button className="text-xs text-blue-600 hover:underline" onClick={() => setPendingSubassemblies(allSubassemblyNames as string[])}>Select All</button>
-                                <button className="text-xs text-gray-500 hover:underline" onClick={() => setPendingSubassemblies([])}>Clear All</button>
-                              </div>
-                              <div className="flex flex-col gap-1">
-                                {(allSubassemblyNames as string[]).filter(name => name.toLowerCase().includes(subassemblySearch.toLowerCase())).map((name, idx) => (
-                                  <label key={name} className="flex items-center gap-2 cursor-pointer text-base">
-                                    <input
-                                      type="checkbox"
-                                      checked={pendingSubassemblies.includes(name)}
-                                      onChange={e => {
-                                        if (e.target.checked) {
-                                          setPendingSubassemblies([...pendingSubassemblies, name]);
-                                        } else {
-                                          setPendingSubassemblies(pendingSubassemblies.filter(n => n !== name));
-                                        }
-                                      }}
-                                    />
-                                    <span>{name}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          </PopoutPortal>
-                        </div>
-                      </div>
-                      {/* Component */}
-                      <div className="flex flex-col gap-1">
-                        <label className="font-semibold text-purple-700">Component</label>
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            className="flex-1 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-purple-400 focus:border-purple-400 text-xs bg-white"
-                            placeholder="Search..."
-                            value={componentSearch}
-                            onChange={e => setComponentSearch(e.target.value)}
-                            style={{ minWidth: 0 }}
-                          />
-                          <button
-                            ref={componentBtnRef}
-                            type="button"
-                            className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-purple-400 focus:border-purple-400 hover:border-purple-400 text-xs flex-1 text-left flex justify-between items-center min-w-0"
-                            style={{ boxShadow: 'none', minWidth: 0 }}
-                            onClick={() => setShowComponentDropdown(v => !v)}
-                          >
-                            <span className="truncate">{selectedComponent.length === 0 ? 'All' : selectedComponent.join(', ')}</span>
-                            <span className="ml-1">▼</span>
-                          </button>
-                          <PopoutPortal anchorRef={componentBtnRef} show={showComponentDropdown}>
-                            <div className="bg-white border border-gray-300 p-4 w-[500px] max-h-96 overflow-auto text-base" style={{ borderRadius: 0, boxShadow: 'none', minWidth: 400, maxWidth: 700 }}>
-                              <label className="flex items-center gap-2 cursor-pointer py-1">
-                                <input
-                                  type="checkbox"
-                                  checked={pendingComponent.length === 0}
-                                  onChange={() => setPendingComponent([])}
-                                />
-                                <span>All</span>
-                              </label>
-                              {sortedComponentNames.filter(name => name.toLowerCase().includes(componentSearch.toLowerCase())).map((name: string, idx: number) => (
-                                <label key={name} className="flex items-center gap-2 cursor-pointer py-1">
-                                  <input
-                                    type="checkbox"
-                                    checked={pendingComponent.includes(name)}
-                                    onChange={() => setPendingComponent(
-                                      pendingComponent.includes(name)
-                                        ? pendingComponent.filter((n: string) => n !== name)
-                                        : [...pendingComponent, name]
-                                    )}
-                                  />
-                                  <span>{name}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </PopoutPortal>
-                        </div>
-                      </div>
+                          </div>
+                        </>
+                      )}
                       {/* Confirm/Clear Buttons */}
                       <div className="flex justify-end mt-2 gap-2">
                         <button
@@ -1463,6 +1860,51 @@ export default function SpreadsheetPage() {
                             'transition-duration': '0.2s',
                           }
                         },
+                        // Facility node style
+                        { selector: 'node.facility', style: {
+                            'background-color': '#2563eb',
+                            'border-color': '#1e40af',
+                            'shape': 'rectangle',
+                            'font-weight': 'bold',
+                            'width': 110,
+                            'height': 60,
+                            'font-size': 22,
+                            'color': '#fff',
+                          }
+                        },
+                        // Floor node style
+                        { selector: 'node.floor', style: {
+                            'background-color': '#06b6d4',
+                            'border-color': '#0e7490',
+                            'shape': 'roundrectangle',
+                            'width': 100,
+                            'height': 50,
+                            'font-size': 18,
+                            'color': '#fff',
+                          }
+                        },
+                        // Space node style
+                        { selector: 'node.space', style: {
+                            'background-color': '#fde68a',
+                            'border-color': '#f59e42',
+                            'shape': 'ellipse',
+                            'width': 90,
+                            'height': 50,
+                            'font-size': 16,
+                            'color': '#92400e',
+                          }
+                        },
+                        // Zone node style
+                        { selector: 'node.zone', style: {
+                            'background-color': '#a78bfa',
+                            'border-color': '#7c3aed',
+                            'shape': 'diamond',
+                            'width': 80,
+                            'height': 80,
+                            'font-size': 16,
+                            'color': '#4c1d95',
+                          }
+                        },
                         { selector: 'node.system', style: {
                             'background-color': '#22c55e',
                             'border-color': '#166534',
@@ -1524,10 +1966,8 @@ export default function SpreadsheetPage() {
                         cy.on('mouseout', 'node', () => setCyTooltip(null));
                         cy.on('tap', 'node', (evt: any) => {
                           const node = evt.target;
-                          console.log('Cytoscape node tapped:', node.data()); // Debug log
-                          if (node.data().type === 'component') {
-                            setSelectedComponentNode(node.data());
-                          }
+                          setIsolatedNodeId(node.id()); // highlight path to top
+                          setSelectedNodeDetails(node.data()); // show details panel
                         });
                         cy.on('cxttap', 'node', (evt: any) => {
                           evt.preventDefault();
@@ -1549,6 +1989,7 @@ export default function SpreadsheetPage() {
                           if (evt.target === cy) {
                             setContextMenu(null);
                             setIsolatedNodeId(null);
+                            setSelectedNodeDetails(null);
                           }
                         });
                       }}
