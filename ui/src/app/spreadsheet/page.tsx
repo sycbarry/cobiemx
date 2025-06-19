@@ -272,6 +272,19 @@ export default function SpreadsheetPage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState<string>('');
+  // Add state for SQL input and query results
+  const [sqlInput, setSqlInput] = useState('SELECT * FROM asset FETCH FIRST 10 ROWS ONLY;');
+  const [queryResults, setQueryResults] = useState<any[]>([]);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [queryVisibility, setQueryVisibility] = useState<{ [key: string]: boolean }>({});
+  // Draggable toolbox state
+  const [cobiePos, setCobiePos] = useState({ x: 24, y: 24 });
+  const [queryPos, setQueryPos] = useState({ x: 600, y: 24 });
+  const cobieRef = useRef<HTMLDivElement>(null);
+  const queryRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState<'cobie' | 'query' | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
   // Update modal width on window resize
   useEffect(() => {
@@ -627,6 +640,70 @@ export default function SpreadsheetPage() {
       localStorage.removeItem('activeSessionId');
     }
   }, [activeSessionId]);
+
+  // Drag handlers
+  const handleDragStart = (type: 'cobie' | 'query', e: React.MouseEvent) => {
+    setDragging(type);
+    const ref = type === 'cobie' ? cobieRef.current : queryRef.current;
+    if (ref) {
+      const rect = ref.getBoundingClientRect();
+      setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    }
+  };
+  const handleDrag = (e: React.MouseEvent) => {
+    if (!dragging) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    const bounds = modal.getBoundingClientRect();
+    let x = e.clientX - bounds.left - dragOffset.x;
+    let y = e.clientY - bounds.top - dragOffset.y;
+    // Clamp to modal bounds
+    x = Math.max(0, Math.min(x, bounds.width - 380));
+    y = Math.max(0, Math.min(y, bounds.height - 80));
+    if (dragging === 'cobie') setCobiePos({ x, y });
+    if (dragging === 'query') setQueryPos({ x, y });
+  };
+  const handleDragEnd = () => setDragging(null);
+
+  // Add handler for running the query
+  const handleRunQuery = useCallback(async () => {
+    setQueryLoading(true);
+    setQueryError(null);
+    setQueryResults([]);
+    if (!activeSessionId) {
+      setQueryError('No active connection selected.');
+      setQueryLoading(false);
+      return;
+    }
+    const conn = connections.find(c => c.id === activeSessionId);
+    if (!conn) {
+      setQueryError('Active connection not found.');
+      setQueryLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch('/api/maximo-connections/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: sqlInput, connection: conn }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setQueryResults(result.rows || []);
+        // Set all visible by default
+        const vis: { [key: string]: boolean } = {};
+        (result.rows || []).forEach((row: any, idx: number) => {
+          vis[row.id || idx] = true;
+        });
+        setQueryVisibility(vis);
+      } else {
+        setQueryError(result.message || 'Query failed');
+      }
+    } catch (err) {
+      setQueryError('Query failed');
+    }
+    setQueryLoading(false);
+  }, [sqlInput, activeSessionId, connections]);
 
   if (!file) {
     return null;
@@ -1045,94 +1122,168 @@ export default function SpreadsheetPage() {
               <h2 className="text-2xl font-semibold text-blue-700 mb-0">COBie Hierarchy</h2>
             </div>
             {hierarchyType === 'graph' ? (
-              <div style={{ width: '100%', height: modalHeight - 120, position: 'relative' }}>
-                {/* Toolbox for filtering */}
+              <div
+                style={{ width: '100%', height: modalHeight - 120, position: 'relative' }}
+                onMouseMove={handleDrag}
+                onMouseUp={handleDragEnd}
+                onMouseLeave={handleDragEnd}
+              >
+                {/* Draggable COBie Hierarchy Toolbox */}
                 <div
-                  className="absolute left-0 top-0 z-20 p-5 bg-white/95 border border-gray-200 rounded-2xl shadow-xl"
-                  style={{ minWidth: 370, maxWidth: 520, fontFamily: 'Inter, Roboto, Arial, sans-serif', boxShadow: '0 8px 32px 0 rgba(0,0,0,0.14)' }}
+                  ref={cobieRef}
+                  className="absolute z-30 p-5 bg-white/95 border border-gray-200 rounded-2xl shadow-xl overflow-auto cursor-grab"
+                  style={{ left: cobiePos.x, top: cobiePos.y, minWidth: 370, maxWidth: 520, maxHeight: modalHeight - 140, fontFamily: 'Inter, Roboto, Arial, sans-serif', boxShadow: '0 8px 32px 0 rgba(0,0,0,0.14)' }}
                 >
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-                    <div className="flex flex-col">
-                      <label className="font-bold text-blue-700 text-sm mb-1">System</label>
-                      <select
-                        className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all shadow-sm hover:border-blue-400"
-                        value={selectedSystem || ''}
-                        onChange={e => setSelectedSystem(e.target.value || null)}
-                      >
-                        <option value="">All</option>
-                        {(allSystemNames as string[]).map((name, idx) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <button
-                        className="text-xs text-blue-500 underline mt-1 self-end hover:text-blue-700 disabled:text-gray-300"
-                        onClick={() => setSelectedSystem(null)}
-                        disabled={!selectedSystem}
-                      >Clear</button>
+                  <div
+                    className="w-full h-6 mb-2 cursor-grab rounded-t-xl bg-blue-100 flex items-center px-2 text-blue-700 font-bold text-xs select-none"
+                    onMouseDown={e => handleDragStart('cobie', e)}
+                  >
+                    COBie Hierarchy Controls
+                  </div>
+                  <div className="flex flex-col gap-4">
+                    {/* System */}
+                    <div>
+                      <label className="font-bold text-blue-700 text-sm mb-1 block">System</label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all shadow-sm hover:border-blue-400"
+                          value={selectedSystem || ''}
+                          onChange={e => setSelectedSystem(e.target.value || null)}
+                        >
+                          <option value="">All</option>
+                          {(allSystemNames as string[]).map((name, idx) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        <button
+                          className="text-xs text-blue-500 underline self-end hover:text-blue-700 disabled:text-gray-300"
+                          onClick={() => setSelectedSystem(null)}
+                          disabled={!selectedSystem}
+                        >Clear</button>
+                      </div>
                     </div>
-                    <div className="flex flex-col">
-                      <label className="font-bold text-yellow-700 text-sm mb-1">Assembly</label>
-                      <select
-                        className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 transition-all shadow-sm hover:border-yellow-400"
-                        multiple
-                        size={Math.min(4, (allAssemblyNames as string[]).length)}
-                        value={selectedAssemblies}
-                        onChange={e => {
-                          const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
-                          setSelectedAssemblies(options);
-                        }}
-                      >
-                        {(allAssemblyNames as string[]).map((name, idx) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <button
-                        className="text-xs text-yellow-600 underline mt-1 self-end hover:text-yellow-800 disabled:text-gray-300"
-                        onClick={() => setSelectedAssemblies([])}
-                        disabled={selectedAssemblies.length === 0}
-                      >Clear</button>
+                    {/* Assembly */}
+                    <div>
+                      <label className="font-bold text-yellow-700 text-sm mb-1 block">Assembly</label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 transition-all shadow-sm hover:border-yellow-400"
+                          multiple
+                          size={Math.min(4, (allAssemblyNames as string[]).length)}
+                          value={selectedAssemblies}
+                          onChange={e => {
+                            const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
+                            setSelectedAssemblies(options);
+                          }}
+                        >
+                          {(allAssemblyNames as string[]).map((name, idx) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        <button
+                          className="text-xs text-yellow-600 underline self-end hover:text-yellow-800 disabled:text-gray-300"
+                          onClick={() => setSelectedAssemblies([])}
+                          disabled={selectedAssemblies.length === 0}
+                        >Clear</button>
+                      </div>
                     </div>
-                    <div className="flex flex-col">
-                      <label className="font-bold text-orange-700 text-sm mb-1">Subassembly</label>
-                      <select
-                        className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 transition-all shadow-sm hover:border-orange-400"
-                        multiple
-                        size={Math.min(4, (allSubassemblyNames as string[]).length)}
-                        value={selectedSubassemblies}
-                        onChange={e => {
-                          const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
-                          setSelectedSubassemblies(options);
-                        }}
-                      >
-                        {(allSubassemblyNames as string[]).map((name, idx) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <button
-                        className="text-xs text-orange-600 underline mt-1 self-end hover:text-orange-800 disabled:text-gray-300"
-                        onClick={() => setSelectedSubassemblies([])}
-                        disabled={selectedSubassemblies.length === 0}
-                      >Clear</button>
+                    {/* Subassembly */}
+                    <div>
+                      <label className="font-bold text-orange-700 text-sm mb-1 block">Subassembly</label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 transition-all shadow-sm hover:border-orange-400"
+                          multiple
+                          size={Math.min(4, (allSubassemblyNames as string[]).length)}
+                          value={selectedSubassemblies}
+                          onChange={e => {
+                            const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
+                            setSelectedSubassemblies(options);
+                          }}
+                        >
+                          {(allSubassemblyNames as string[]).map((name, idx) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        <button
+                          className="text-xs text-orange-600 underline self-end hover:text-orange-800 disabled:text-gray-300"
+                          onClick={() => setSelectedSubassemblies([])}
+                          disabled={selectedSubassemblies.length === 0}
+                        >Clear</button>
+                      </div>
                     </div>
-                    <div className="flex flex-col">
-                      <label className="font-bold text-purple-700 text-sm mb-1">Component</label>
-                      <select
-                        className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all shadow-sm hover:border-purple-400"
-                        value={selectedComponent || ''}
-                        onChange={e => setSelectedComponent(e.target.value || null)}
-                      >
-                        <option value="">All</option>
-                        {(allComponentNames as string[]).map((name, idx) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <button
-                        className="text-xs text-purple-600 underline mt-1 self-end hover:text-purple-800 disabled:text-gray-300"
-                        onClick={() => setSelectedComponent(null)}
-                        disabled={!selectedComponent}
-                      >Clear</button>
+                    {/* Component */}
+                    <div>
+                      <label className="font-bold text-purple-700 text-sm mb-1 block">Component</label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-base bg-white focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all shadow-sm hover:border-purple-400"
+                          value={selectedComponent || ''}
+                          onChange={e => setSelectedComponent(e.target.value || null)}
+                        >
+                          <option value="">All</option>
+                          {(allComponentNames as string[]).map((name, idx) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        <button
+                          className="text-xs text-purple-600 underline self-end hover:text-purple-800 disabled:text-gray-300"
+                          onClick={() => setSelectedComponent(null)}
+                          disabled={!selectedComponent}
+                        >Clear</button>
+                      </div>
                     </div>
                   </div>
+                </div>
+                {/* Draggable Database Query Toolbox (right side) */}
+                <div
+                  ref={queryRef}
+                  className="absolute z-30 p-5 bg-gray-50 border border-gray-200 rounded-2xl shadow-xl overflow-auto cursor-grab"
+                  style={{ left: queryPos.x, top: queryPos.y, minWidth: 370, maxWidth: 520, maxHeight: modalHeight - 140, fontFamily: 'Inter, Roboto, Arial, sans-serif', boxShadow: '0 8px 32px 0 rgba(0,0,0,0.10)' }}
+                >
+                  <div
+                    className="w-full h-6 mb-2 cursor-grab rounded-t-xl bg-purple-100 flex items-center px-2 text-purple-700 font-bold text-xs select-none"
+                    onMouseDown={e => handleDragStart('query', e)}
+                  >
+                    Database Query Controls
+                  </div>
+                  {/* SQL Query Input */}
+                  <div className="mb-4">
+                    <label className="font-bold text-purple-700 text-sm mb-1 block">Run SQL Query (SELECT only)</label>
+                    <textarea
+                      className="w-full border rounded-lg px-3 py-2 text-base font-mono bg-white focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all shadow-sm mb-2"
+                      rows={3}
+                      value={sqlInput}
+                      onChange={e => setSqlInput(e.target.value)}
+                      placeholder="SELECT * FROM asset FETCH FIRST 10 ROWS ONLY;"
+                    />
+                    <button
+                      className="mt-1 px-5 py-2 bg-purple-600 text-white rounded shadow hover:bg-purple-700 transition-colors font-semibold text-base disabled:opacity-60"
+                      disabled={queryLoading || !sqlInput.trim()}
+                      onClick={handleRunQuery}
+                    >
+                      {queryLoading ? 'Running...' : 'Run Query'}
+                    </button>
+                    {queryError && <div className="text-red-600 text-sm mt-2">{queryError}</div>}
+                  </div>
+                  {/* Query Results Placeholder */}
+                  {queryResults.length > 0 && (
+                    <div className="mt-4">
+                      <div className="font-bold text-gray-700 mb-2">Query Results (toggle visibility):</div>
+                      <ul className="max-h-40 overflow-auto border rounded bg-white p-2">
+                        {queryResults.map((row, idx) => (
+                          <li key={row.id || idx} className="flex items-center gap-2 py-1">
+                            <input
+                              type="checkbox"
+                              checked={queryVisibility[row.id || idx] ?? true}
+                              onChange={e => setQueryVisibility(v => ({ ...v, [row.id || idx]: e.target.checked }))}
+                            />
+                            <span className="font-mono text-xs text-gray-700 truncate">{JSON.stringify(row)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
                 <CytoscapeComponent
                   key={cyKey}
