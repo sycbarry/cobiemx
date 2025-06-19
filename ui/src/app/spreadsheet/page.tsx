@@ -10,6 +10,7 @@ import "reactflow/dist/style.css";
 import { useRouter } from "next/navigation";
 import CytoscapeComponent from "react-cytoscapejs";
 import cytoscape from "cytoscape";
+import { FaCog } from "react-icons/fa";
 
 function HierarchyTree({ hierarchy }: { hierarchy: any }) {
   if (!hierarchy || hierarchy.error) return <div className="text-red-600">{hierarchy?.error || "No hierarchy data"}</div>;
@@ -244,6 +245,30 @@ export default function SpreadsheetPage() {
   const [selectedAssemblies, setSelectedAssemblies] = useState<string[]>([]);
   const [selectedSubassemblies, setSelectedSubassemblies] = useState<string[]>([]);
   const [selectedComponent, setSelectedComponent] = useState<string | null>(null);
+  // Sidebar state
+  const [showSidebar, setShowSidebar] = useState(false);
+  // DB2 connection form state
+  const [db2Settings, setDb2Settings] = useState({
+    hostname: '',
+    port: '',
+    database: '',
+    username: '',
+    password: '',
+  });
+  const [db2Connecting, setDb2Connecting] = useState(false);
+  const [db2Error, setDb2Error] = useState<string | null>(null);
+  const [db2Connected, setDb2Connected] = useState(false);
+  // Add modal state
+  const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
+  // Mocked connections list
+  const maximoConnections = [
+    { name: 'Maximo Dev', id: 'dev' },
+    { name: 'Maximo Prod', id: 'prod' },
+    { name: 'Add New Connection', id: 'new' },
+  ];
+  // Add tab state
+  const [activeTab, setActiveTab] = useState<'cobie' | 'maximo'>('cobie');
 
   // Update modal width on window resize
   useEffect(() => {
@@ -506,6 +531,24 @@ export default function SpreadsheetPage() {
   const cyKey = useMemo(() => `cy-${selectedSystem || ''}-${selectedAssemblies.join(',')}-${selectedSubassemblies.join(',')}-${selectedComponent || ''}`,
     [selectedSystem, selectedAssemblies, selectedSubassemblies, selectedComponent]);
 
+  const handleDb2Input = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setDb2Settings((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleDb2Connect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDb2Connecting(true);
+    setDb2Error(null);
+    setDb2Connected(false);
+    // TODO: Implement backend call to test DB2 connection
+    setTimeout(() => {
+      // Simulate success
+      setDb2Connecting(false);
+      setDb2Connected(true);
+    }, 1200);
+  };
+
   if (!file) {
     return null;
   }
@@ -514,150 +557,273 @@ export default function SpreadsheetPage() {
   }
   return (
     <div className="min-h-screen w-full bg-gray-50 py-10 px-0 font-sans">
+      {/* Tab Bar at the Top */}
+      <div className="w-full bg-gradient-to-r from-gray-100 via-white to-gray-100 border-b border-gray-200 px-8 flex items-center gap-0 shadow-sm rounded-b-2xl" style={{minHeight: 60}}>
+        <button
+          className={`px-8 py-3 font-bold text-lg rounded-t-xl border-b-4 transition-all duration-150 focus:outline-none ${activeTab === 'cobie' ? 'border-blue-600 bg-white text-blue-800 shadow' : 'border-transparent text-gray-500 hover:bg-gray-100'}`}
+          onClick={() => setActiveTab('cobie')}
+        >
+          COBie Sheet Viewer
+        </button>
+        <button
+          className={`px-8 py-3 font-bold text-lg rounded-t-xl border-b-4 transition-all duration-150 focus:outline-none ${activeTab === 'maximo' ? 'border-blue-600 bg-white text-blue-800 shadow' : 'border-transparent text-gray-500 hover:bg-gray-100'}`}
+          onClick={() => setActiveTab('maximo')}
+        >
+          Maximo Connections
+        </button>
+      </div>
       <div className="w-full max-w-[1800px] mx-auto flex flex-col h-[80vh]">
-        <header className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-6 px-8">
-          <div>
-            <h1 className="text-4xl font-extrabold text-blue-800 mb-2 tracking-tight drop-shadow-sm">COBie Spreadsheet View</h1>
-            <p className="text-lg text-gray-500">Upload and explore COBie data in a modern, interactive spreadsheet.</p>
-          </div>
-          <div className="flex flex-col gap-2 items-end">
-            {/* Segmented control for hierarchy type */}
-            <div className="flex gap-0.5 rounded-lg overflow-hidden border border-gray-200 bg-gray-100 mb-2">
-              <button
-                className={`px-5 py-2 font-semibold text-base transition-colors focus:outline-none ${hierarchyType === 'facility' ? 'bg-blue-600 text-white' : 'bg-transparent text-blue-700 hover:bg-blue-100'}`}
-                onClick={() => setHierarchyType('facility')}
-              >
-                Facility
-              </button>
-              <button
-                className={`px-5 py-2 font-semibold text-base transition-colors focus:outline-none ${hierarchyType === 'system' ? 'bg-green-600 text-white' : 'bg-transparent text-green-700 hover:bg-green-100'}`}
-                onClick={() => setHierarchyType('system')}
-              >
-                System
-              </button>
-              <button
-                className={`px-5 py-2 font-semibold text-base transition-colors focus:outline-none ${hierarchyType === 'graph' ? 'bg-purple-600 text-white' : 'bg-transparent text-purple-700 hover:bg-purple-100'}`}
-                onClick={() => setHierarchyType('graph')}
-              >
-                Graph
-              </button>
+        {activeTab === 'cobie' && (
+          <header className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-6 px-8">
+            <div>
+              <h1 className="text-4xl font-extrabold text-blue-800 mb-2 tracking-tight drop-shadow-sm">COBie Maximo Cross Validation</h1>
+              <p className="text-lg text-gray-500">Upload and explore COBie data in a modern, interactive spreadsheet.</p>
             </div>
-            {/* Sheet selectors for hierarchy */}
-            {hierarchyType === 'facility' ? (
-              <div className="flex gap-2">
-                <select value={facilityTab} onChange={e => setFacilityTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-                <select value={floorTab} onChange={e => setFloorTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-                <select value={spaceTab} onChange={e => setSpaceTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-              </div>
-            ) : hierarchyType === 'system' ? (
-              <div className="flex gap-2">
-                <select value={systemTab} onChange={e => setSystemTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-                <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-                <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <select value={systemTab} onChange={e => setSystemTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-                <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-                <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border rounded px-3 py-1 text-base">
-                  {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-              </div>
-            )}
-            <button
-              className="mt-2 px-5 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition-colors font-semibold text-base"
-              onClick={openHierarchy}
-            >
-              Show Hierarchy
-            </button>
-          </div>
-        </header>
-        <div className="w-full px-8 flex-1 flex flex-col min-h-0">
-          <div className="mb-4 border-b border-gray-200">
-            <nav className="flex flex-wrap gap-2" aria-label="Tabs">
-              {sheetNames.map((name) => (
+            <div className="flex flex-col gap-3 items-end mt-6">
+              {/* Segmented control for hierarchy type */}
+              <div className="flex gap-0.5 rounded-full overflow-hidden border border-gray-200 bg-gray-50 shadow-sm mb-2">
                 <button
-                  key={name}
-                  className={`px-6 py-2 rounded-t-lg border-b-2 font-semibold text-base focus:outline-none transition-all duration-150
-                    ${selectedSheet === name
-                      ? "border-blue-600 bg-white text-blue-700 shadow-sm drop-shadow-sm"
-                      : "border-transparent bg-gray-100 text-gray-500 hover:bg-white hover:text-blue-600"}
-                  `}
-                  style={{ minWidth: 140 }}
-                  onClick={() => setSelectedSheet(name)}
+                  className={`px-6 py-2 font-bold text-base transition-colors focus:outline-none rounded-full ${hierarchyType === 'facility' ? 'bg-blue-600 text-white shadow' : 'bg-transparent text-blue-700 hover:bg-blue-100'}`}
+                  onClick={() => setHierarchyType('facility')}
                 >
-                  {name}
+                  Facility
                 </button>
-              ))}
-            </nav>
+                <button
+                  className={`px-6 py-2 font-bold text-base transition-colors focus:outline-none rounded-full ${hierarchyType === 'system' ? 'bg-green-600 text-white shadow' : 'bg-transparent text-green-700 hover:bg-green-100'}`}
+                  onClick={() => setHierarchyType('system')}
+                >
+                  System
+                </button>
+                <button
+                  className={`px-6 py-2 font-bold text-base transition-colors focus:outline-none rounded-full ${hierarchyType === 'graph' ? 'bg-purple-600 text-white shadow' : 'bg-transparent text-purple-700 hover:bg-purple-100'}`}
+                  onClick={() => setHierarchyType('graph')}
+                >
+                  Graph
+                </button>
+              </div>
+              {/* Dropdowns and Show Hierarchy button in a row */}
+              <div className="flex flex-row gap-3 items-center mt-1">
+                {hierarchyType === 'facility' ? (
+                  <>
+                    <select value={facilityTab} onChange={e => setFacilityTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <select value={floorTab} onChange={e => setFloorTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <select value={spaceTab} onChange={e => setSpaceTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </>
+                ) : hierarchyType === 'system' ? (
+                  <>
+                    <select value={systemTab} onChange={e => setSystemTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-green-400 focus:border-green-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </>
+                ) : (
+                  <>
+                    <select value={systemTab} onChange={e => setSystemTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <select value={componentTab} onChange={e => setComponentTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <select value={assemblyTab} onChange={e => setAssemblyTab(e.target.value)} className="border rounded-lg px-4 py-2 text-base shadow-sm focus:ring-2 focus:ring-purple-400 focus:border-purple-400 transition-all">
+                      {sheetNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </>
+                )}
+                <button
+                  className="ml-2 px-7 py-2 bg-blue-600 text-white rounded-xl shadow font-bold text-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  onClick={openHierarchy}
+                >
+                  Show Hierarchy
+                </button>
+              </div>
+            </div>
+          </header>
+        )}
+        {activeTab === 'cobie' && (
+          <div className="w-full px-8 flex-1 flex flex-col min-h-0">
+            <div className="mb-4 border-b border-gray-200">
+              <nav className="flex flex-wrap gap-2" aria-label="Tabs">
+                {sheetNames.map((name) => (
+                  <button
+                    key={name}
+                    className={`px-6 py-2 rounded-t-lg border-b-2 font-semibold text-base focus:outline-none transition-all duration-150
+                      ${selectedSheet === name
+                        ? "border-blue-600 bg-white text-blue-700 shadow-sm drop-shadow-sm"
+                        : "border-transparent bg-gray-100 text-gray-500 hover:bg-white hover:text-blue-600"}
+                    `}
+                    style={{ minWidth: 140 }}
+                    onClick={() => setSelectedSheet(name)}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </nav>
+            </div>
+            <div className="border rounded-2xl shadow-lg overflow-auto bg-white flex-1 min-h-0" style={{ minHeight: 0, width: '100%' }}>
+              <div className="w-full h-full" style={{ background: '#fff', borderRadius: 18, boxShadow: '0 4px 16px 0 rgba(0,0,0,0.06)', height: '100%', minWidth: 900 }}>
+                <DataGrid
+                  columns={resizableColumns}
+                  rows={rows}
+                  className="rdg-light google-sheets-style"
+                  style={{
+                    minWidth: 1200,
+                    fontFamily: 'Inter, Roboto, Arial, sans-serif',
+                    fontSize: 15,
+                    borderRadius: 18,
+                    border: '1.5px solid #e0e7ef',
+                    boxShadow: '0 4px 16px 0 rgba(0,0,0,0.06)',
+                    height: '100%',
+                  }}
+                  rowHeight={36}
+                  headerRowHeight={40}
+                />
+              </div>
+            </div>
+            <style jsx global>{`
+              .google-sheets-style .rdg-header-row {
+                background: #f8fafc;
+                font-weight: 600;
+                border-bottom: 2px solid #e0e0e0;
+                position: sticky;
+                top: 0;
+                z-index: 2;
+                letter-spacing: 0.01em;
+              }
+              .google-sheets-style .rdg-row {
+                border-bottom: 1px solid #f1f1f1;
+                transition: background 0.15s;
+              }
+              .google-sheets-style .rdg-row:hover {
+                background: #f1f5f9;
+              }
+              .google-sheets-style .rdg-cell {
+                border-right: 1px solid #f1f1f1;
+                padding: 0 14px;
+                background: #fff;
+              }
+              .google-sheets-style .rdg-cell:last-child {
+                border-right: none;
+              }
+              .google-sheets-style .rdg {
+                border-radius: 18px;
+                overflow: hidden;
+              }
+            `}</style>
           </div>
-          <div className="border rounded-2xl shadow-lg overflow-auto bg-white flex-1 min-h-0" style={{ minHeight: 0, width: '100%' }}>
-            <div className="w-full h-full" style={{ background: '#fff', borderRadius: 18, boxShadow: '0 4px 16px 0 rgba(0,0,0,0.06)', height: '100%', minWidth: 900 }}>
-              <DataGrid
-                columns={resizableColumns}
-                rows={rows}
-                className="rdg-light google-sheets-style"
-                style={{
-                  minWidth: 1200,
-                  fontFamily: 'Inter, Roboto, Arial, sans-serif',
-                  fontSize: 15,
-                  borderRadius: 18,
-                  border: '1.5px solid #e0e7ef',
-                  boxShadow: '0 4px 16px 0 rgba(0,0,0,0.06)',
-                  height: '100%',
-                }}
-                rowHeight={36}
-                headerRowHeight={40}
-              />
+        )}
+        {activeTab === 'maximo' && (
+          <div className="w-full flex flex-col items-center justify-start py-12 px-4">
+            <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-8 border border-gray-200">
+              <h2 className="text-2xl font-bold text-blue-700 mb-6">Maximo Connections</h2>
+              <ul className="flex flex-col gap-3 mb-8">
+                {maximoConnections.map(conn => (
+                  <li key={conn.id}>
+                    <button
+                      className="w-full text-left px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 hover:bg-blue-50 font-semibold text-base text-gray-800 transition flex items-center justify-between"
+                      onClick={() => {
+                        setSelectedConnection(conn.id);
+                        setShowConnectionModal(true);
+                      }}
+                    >
+                      {conn.name}
+                      <span className="ml-2 text-gray-400">&rarr;</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {/* Show connection modal inline instead of as a modal */}
+              {selectedConnection && (
+                <div className="relative bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md z-70 animate-slide-in-bottom border border-blue-100">
+                  <button
+                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-3xl font-bold"
+                    onClick={() => { setSelectedConnection(null); setDb2Connected(false); setDb2Error(null); }}
+                    aria-label="Close connection modal"
+                  >
+                    &times;
+                  </button>
+                  <h3 className="text-xl font-bold text-blue-700 mb-4">{selectedConnection === 'new' ? 'Add New Connection' : maximoConnections.find(c => c.id === selectedConnection)?.name}</h3>
+                  <form className="flex flex-col gap-4" onSubmit={handleDb2Connect}>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-semibold text-gray-700">Hostname</span>
+                      <input
+                        type="text"
+                        name="hostname"
+                        value={db2Settings.hostname}
+                        onChange={handleDb2Input}
+                        className="border rounded px-3 py-2 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                        required
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-semibold text-gray-700">Port</span>
+                      <input
+                        type="text"
+                        name="port"
+                        value={db2Settings.port}
+                        onChange={handleDb2Input}
+                        className="border rounded px-3 py-2 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                        required
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-semibold text-gray-700">Database</span>
+                      <input
+                        type="text"
+                        name="database"
+                        value={db2Settings.database}
+                        onChange={handleDb2Input}
+                        className="border rounded px-3 py-2 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                        required
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-semibold text-gray-700">Username</span>
+                      <input
+                        type="text"
+                        name="username"
+                        value={db2Settings.username}
+                        onChange={handleDb2Input}
+                        className="border rounded px-3 py-2 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                        required
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-semibold text-gray-700">Password</span>
+                      <input
+                        type="password"
+                        name="password"
+                        value={db2Settings.password}
+                        onChange={handleDb2Input}
+                        className="border rounded px-3 py-2 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+                        required
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="mt-2 px-5 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 transition-colors font-semibold text-base disabled:opacity-60"
+                      disabled={db2Connecting}
+                    >
+                      {db2Connecting ? 'Testing...' : db2Connected ? 'Connection Successful!' : 'Test Connection'}
+                    </button>
+                    {db2Error && <div className="text-red-600 text-sm mt-2">{db2Error}</div>}
+                    {db2Connected && <div className="text-green-600 text-sm mt-2">Connection successful!</div>}
+                  </form>
+                </div>
+              )}
             </div>
           </div>
-          <style jsx global>{`
-            .google-sheets-style .rdg-header-row {
-              background: #f8fafc;
-              font-weight: 600;
-              border-bottom: 2px solid #e0e0e0;
-              position: sticky;
-              top: 0;
-              z-index: 2;
-              letter-spacing: 0.01em;
-            }
-            .google-sheets-style .rdg-row {
-              border-bottom: 1px solid #f1f1f1;
-              transition: background 0.15s;
-            }
-            .google-sheets-style .rdg-row:hover {
-              background: #f1f5f9;
-            }
-            .google-sheets-style .rdg-cell {
-              border-right: 1px solid #f1f1f1;
-              padding: 0 14px;
-              background: #fff;
-            }
-            .google-sheets-style .rdg-cell:last-child {
-              border-right: none;
-            }
-            .google-sheets-style .rdg {
-              border-radius: 18px;
-              overflow: hidden;
-            }
-          `}</style>
-        </div>
+        )}
       </div>
       {/* Hierarchy Modal/Side Panel */}
       {showHierarchy && (
