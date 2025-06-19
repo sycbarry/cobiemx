@@ -36,4 +36,15 @@ export async function POST(req: NextRequest) {
   connections.push(body);
   await fs.writeFile(FILE_PATH, JSON.stringify(connections, null, 2));
   return NextResponse.json({ success: true, connection: body });
+}
+
+export async function DELETE(req: NextRequest) {
+  await ensureDataFile();
+  const { id } = await req.json();
+  if (!id) return NextResponse.json({ success: false, message: 'Missing id' }, { status: 400 });
+  const data = await fs.readFile(FILE_PATH, 'utf-8');
+  const connections = JSON.parse(data);
+  const filtered = connections.filter((conn: any) => conn.id !== id);
+  await fs.writeFile(FILE_PATH, JSON.stringify(filtered, null, 2));
+  return NextResponse.json({ success: true });
 } 

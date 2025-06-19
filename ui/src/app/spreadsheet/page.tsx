@@ -10,7 +10,7 @@ import "reactflow/dist/style.css";
 import { useRouter } from "next/navigation";
 import CytoscapeComponent from "react-cytoscapejs";
 import cytoscape from "cytoscape";
-import { FaCog, FaCheckCircle } from "react-icons/fa";
+import { FaCog, FaCheckCircle, FaTrash } from "react-icons/fa";
 
 function HierarchyTree({ hierarchy }: { hierarchy: any }) {
   if (!hierarchy || hierarchy.error) return <div className="text-red-600">{hierarchy?.error || "No hierarchy data"}</div>;
@@ -596,6 +596,25 @@ export default function SpreadsheetPage() {
     }
   };
 
+  // Add delete handler
+  const handleDeleteConnection = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this connection?')) return;
+    try {
+      const res = await fetch('/api/maximo-connections', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setConnections(connections => connections.filter(conn => conn.id !== id));
+        if (activeSessionId === id) setActiveSessionId(null);
+      }
+    } catch (err) {
+      alert('Failed to delete connection.');
+    }
+  };
+
   // Persist activeSessionId in localStorage
   useEffect(() => {
     const stored = localStorage.getItem('activeSessionId');
@@ -807,15 +826,35 @@ export default function SpreadsheetPage() {
                               <FaCheckCircle className="text-green-500 ml-2" title="Connected" />
                             )}
                           </button>
-                          <button
-                            className={`ml-3 px-4 py-1 rounded-lg font-bold text-sm border ${activeSessionId === conn.id ? 'bg-blue-600 text-white border-blue-700 cursor-not-allowed' : 'bg-white text-blue-700 border-blue-400 hover:bg-blue-100'}`}
-                            onClick={() => {
-                              if (testStatus !== 'loading' && activeSessionId !== conn.id) setActiveSessionId(conn.id);
-                            }}
-                            disabled={activeSessionId === conn.id || testStatus === 'loading'}
-                          >
-                            {activeSessionId === conn.id ? 'Connected' : 'Connect'}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {activeSessionId === conn.id ? (
+                              <button
+                                className="ml-3 px-4 py-1 rounded-lg font-bold text-sm border bg-white text-blue-700 border-blue-400 hover:bg-blue-100"
+                                onClick={() => setActiveSessionId(null)}
+                              >
+                                Disconnect
+                              </button>
+                            ) : (
+                              <button
+                                className={`ml-3 px-4 py-1 rounded-lg font-bold text-sm border bg-white text-blue-700 border-blue-400 hover:bg-blue-100`}
+                                onClick={() => {
+                                  if (testStatus !== 'loading') setActiveSessionId(conn.id);
+                                }}
+                                disabled={testStatus === 'loading'}
+                              >
+                                Connect
+                              </button>
+                            )}
+                            {activeSessionId !== conn.id && (
+                              <button
+                                className="ml-2 p-2 rounded-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition"
+                                title="Delete connection"
+                                onClick={() => handleDeleteConnection(conn.id)}
+                              >
+                                <FaTrash />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </li>
                     ))}

@@ -1,20 +1,11 @@
 [
   {
-    "name": "Maximo Dev",
-    "id": "dev",
-    "hostname": "",
-    "port": "",
-    "database": "",
-    "username": "",
-    "password": ""
-  },
-  {
-    "name": "Maximo Dev",
-    "id": "dev",
+    "name": "test",
     "hostname": "test",
     "port": "test",
     "database": "test",
     "username": "test",
-    "password": "test"
+    "password": "test",
+    "id": "conn-1750307697161"
   }
 ]
